@@ -52,6 +52,7 @@ Antes de limpiar archivos o iniciar descargas, la version controlada ejecuta un 
 5. Validar si hay archivos temporales incompletos.
 6. Confirmar si la carpeta compartida fue publicada.
 7. Revisar si hubo timeout, falla de ChromeDriver, cambio de cabecera o error de credenciales.
+8. Buscar `DB_FILE_WARN`; si existe, el archivo puede haberse descargado y publicado, pero no cargado a staging.
 
 Para incidentes de ChromeDriver revisar tambien:
 

@@ -97,3 +97,33 @@ Inestabilidad del entorno Chromium/ChromeDriver bajo ejecucion automatica, espec
 - Usar wrapper con `flock` para impedir solapamiento entre corrida automatica y manual.
 - Ejecutar preflight de ChromeDriver antes de limpiar archivos o descargar.
 - Si el preflight falla, no continuar con los 104 centros.
+
+## Archivo descargado no carga a staging por campo extenso
+
+**Sintoma:**
+
+```text
+DB_FILE_WARN | <archivo>.txt | Error: field larger than field limit (131072)
+```
+
+**Impacto:**
+
+- El archivo puede estar descargado y publicado en la carpeta compartida.
+- `raw.archivo_descargado` queda con `cargado_stg=false`.
+- `stg.cext_prod_diario` no recibe filas de ese archivo.
+- Las vistas basadas en la ultima corrida, como `ops.vw_cext_diaria_medicos_activos_full`, no muestran registros del centro afectado.
+
+**Causa probable:**
+
+El TXT contiene un campo muy largo y el limite por defecto del parser CSV de Python bloquea la carga a staging.
+
+**Validacion:**
+
+- Buscar `DB_FILE_WARN` en `summary.log` o `run.log`.
+- Confirmar que el centro aparece como descargado en `raw.archivo_descargado`.
+- Confirmar que no existen filas para `id_run` e `id_archivo` en `stg.cext_prod_diario`.
+
+**Accion recomendada:**
+
+- Mantener ampliado `csv.field_size_limit` en el script diario.
+- Reejecutar el RPA o recargar el archivo afectado para que staging y las vistas se actualicen.

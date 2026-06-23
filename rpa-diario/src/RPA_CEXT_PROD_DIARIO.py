@@ -29,6 +29,14 @@ from pathlib import Path
 import re
 import random
 
+_CSV_FIELD_LIMIT = sys.maxsize
+while True:
+    try:
+        csv.field_size_limit(_CSV_FIELD_LIMIT)
+        break
+    except OverflowError:
+        _CSV_FIELD_LIMIT //= 10
+
 from mailer import send_smtp_mail
 from selenium import webdriver
 from selenium.webdriver.common.by import By
