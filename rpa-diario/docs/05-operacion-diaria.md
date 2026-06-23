@@ -41,6 +41,8 @@ Una corrida correcta debe cumplir:
 
 En una corrida con descargas y publicacion correctas debe aparecer en `summary.log` un evento `REFRESH_REPORTES_DIARIO` antes de `RUN_END`. Si aparece `REFRESH_REPORTES_DIARIO_SKIP`, revisar el motivo indicado.
 
+Antes de limpiar archivos o iniciar descargas, la version controlada ejecuta un preflight de ChromeDriver. Si falla, se registra `CHROMEDRIVER_PREFLIGHT_FAIL` y la corrida termina sin borrar los archivos del TAG.
+
 ## Revision ante falla
 
 1. Revisar log de corrida.
@@ -50,3 +52,9 @@ En una corrida con descargas y publicacion correctas debe aparecer en `summary.l
 5. Validar si hay archivos temporales incompletos.
 6. Confirmar si la carpeta compartida fue publicada.
 7. Revisar si hubo timeout, falla de ChromeDriver, cambio de cabecera o error de credenciales.
+
+Para incidentes de ChromeDriver revisar tambien:
+
+- `tmp_chrome/chromedriver_logs/`
+- Conteo de procesos `chromedriver` y `chromium-browser`.
+- Variable `MAX_CONCURRENT_DRIVER_STARTS`; en produccion se recomienda `1`.

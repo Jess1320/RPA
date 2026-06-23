@@ -66,3 +66,34 @@
 - Confirmar permisos por macroregion.
 - Actualizar secreto fuera de Git.
 
+## Falla masiva de ChromeDriver al iniciar
+
+**Sintoma:**
+
+```text
+Service /usr/bin/chromedriver unexpectedly exited. Status code was: 1
+```
+
+**Impacto:**
+
+- La corrida puede terminar con `TOTAL_OK=0` o con muy pocos centros descargados.
+- No se publica informacion nueva.
+- Los consumidores mantienen data anterior o quedan sin actualizacion esperada.
+
+**Causa probable:**
+
+Inestabilidad del entorno Chromium/ChromeDriver bajo ejecucion automatica, especialmente cuando se inician varios navegadores headless en paralelo o quedan procesos/restos de una corrida anterior.
+
+**Validacion:**
+
+- Revisar `summary.log` y `run.log`.
+- Buscar `DRIVER_START_FAIL`.
+- Revisar `tmp_chrome/chromedriver_logs/`.
+- Verificar procesos activos de `chromedriver` y `chromium-browser`.
+
+**Accion recomendada:**
+
+- Mantener `MAX_CONCURRENT_DRIVER_STARTS=1`.
+- Usar wrapper con `flock` para impedir solapamiento entre corrida automatica y manual.
+- Ejecutar preflight de ChromeDriver antes de limpiar archivos o descargar.
+- Si el preflight falla, no continuar con los 104 centros.

@@ -1097,17 +1097,45 @@ def apply_driver_timeouts(driver, center_timeout: int, user: str, center_code: s
         )
 
 
+def _safe_log_token(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value or "unknown"))[:80]
+
+
+def _tail_text(path: str, max_chars: int = 1200) -> str:
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            data = f.read()
+        data = " ".join(data.split())
+        if len(data) > max_chars:
+            return "..." + data[-max_chars:]
+        return data
+    except Exception:
+        return ""
+
+
+def _chromedriver_log_path(user: str, center_code: str, startup_attempt: int) -> str:
+    log_dir = os.path.join(get_chrome_tmp_root(), "chromedriver_logs")
+    os.makedirs(log_dir, exist_ok=True)
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    return os.path.join(
+        log_dir,
+        f"chromedriver_{ts}_{_safe_log_token(user)}_{_safe_log_token(center_code)}_{startup_attempt}.log"
+    )
+
+
 def create_webdriver_with_retry(chrome_options, user: str, center_code: str, startup_tries: int = 3):
     last_exc = None
     for startup_attempt in range(1, startup_tries + 1):
         if STOP_EVENT.is_set():
             raise RuntimeError("CANCELADO")
 
+        log_path = _chromedriver_log_path(user, center_code, startup_attempt)
+
         with DRIVER_START_SEMAPHORE:
             try:
                 driver = webdriver.Chrome(
                     options=chrome_options,
-                    service=build_chrome_service()
+                    service=build_chrome_service(log_path=log_path)
                 )
                 if startup_attempt > 1:
                     print(
@@ -1118,17 +1146,58 @@ def create_webdriver_with_retry(chrome_options, user: str, center_code: str, sta
             except Exception as e:
                 last_exc = e
                 detail = format_exception_detail(e)
+                driver_log_tail = _tail_text(log_path)
+                if driver_log_tail:
+                    detail = f"{detail} | chromedriver_log={log_path} | tail={driver_log_tail}"
+                else:
+                    detail = f"{detail} | chromedriver_log={log_path}"
                 print(
                     f"WARN | DRIVER_START_FAIL | {user} | {center_code} | startup_attempt={startup_attempt}/{startup_tries} | {detail}",
                     flush=True
                 )
 
         if startup_attempt < startup_tries:
-            time.sleep(min(3.0, 0.8 * startup_attempt))
+            time.sleep(min(10.0, 2.0 * startup_attempt + random.random()))
 
     if last_exc:
         raise last_exc
     raise RuntimeError("No se pudo iniciar ChromeDriver")
+
+
+def preflight_chromedriver(download_dir_primary: str, headless: bool, summary_path: str) -> bool:
+    profile_dir = ""
+    driver = None
+    try:
+        chrome_options, profile_dir = build_chrome_options(
+            download_dir_primary,
+            headless=headless,
+            worker_id="preflight"
+        )
+        driver = create_webdriver_with_retry(
+            chrome_options=chrome_options,
+            user="PREFLIGHT",
+            center_code="CHROMEDRIVER",
+            startup_tries=2
+        )
+        driver.get("about:blank")
+        summary(summary_path, "CHROMEDRIVER_PREFLIGHT_OK")
+        return True
+    except Exception as e:
+        summary(summary_path, f"CHROMEDRIVER_PREFLIGHT_FAIL | {format_exception_detail(e, max_len=1200)}")
+        return False
+    finally:
+        try:
+            if driver:
+                driver.quit()
+        except Exception:
+            pass
+        unregister_active_driver(driver)
+        try:
+            if profile_dir:
+                safe_rmtree(profile_dir)
+                unregister_active_profile_dir(profile_dir)
+        except Exception:
+            pass
 
 
 def _should_retry_gsheets(err: Exception) -> bool:
@@ -1406,8 +1475,8 @@ def build_chrome_options(download_dir_primary: str, headless: bool, worker_id: s
     return chrome_options, profile_dir
 
 
-def build_chrome_service() -> ChromeService:
-    service = ChromeService(executable_path="/usr/bin/chromedriver", log_output=os.devnull)
+def build_chrome_service(log_path: Optional[str] = None) -> ChromeService:
+    service = ChromeService(executable_path="/usr/bin/chromedriver", log_output=log_path or os.devnull)
     try:
         import subprocess as _sp
         service.creationflags = _sp.CREATE_NO_WINDOW
@@ -3080,6 +3149,36 @@ def main():
     print(f"MACRO_USERS   : { {k: v[0] for k, v in MACRO_USERS.items()} }", flush=True)
     print(f"INPUT | Centros (checks merge) ({len(centros_meta)}): {centros_meta}", flush=True)
     print("==================================\n", flush=True)
+
+    if not preflight_chromedriver(DOWNLOAD_DIR_PRIMARY, HEADLESS, summary_path):
+        failure_stage = "CHROMEDRIVER_PREFLIGHT"
+        failure_detail = "ChromeDriver no pudo iniciar antes de limpiar o descargar."
+        end_dt = datetime.datetime.now()
+        dur = (end_dt - start_dt).total_seconds()
+
+        if db and run_db_id:
+            try:
+                db.log_event(run_db_id, "ERROR", "CHROMEDRIVER_PREFLIGHT_FAIL", failure_detail)
+                db.finish_run(
+                    id_run=run_db_id,
+                    estado="FAILED",
+                    total_input=len(centros_meta),
+                    total_ok=0,
+                    total_fail=len(centros_meta),
+                    duration_seconds=dur,
+                    observacion=failure_detail
+                )
+            except Exception as e:
+                print(f"DB_FINISH_WARN | {type(e).__name__}: {e}", flush=True)
+
+        summary(summary_path, "RUN_END")
+        summary(summary_path, f"Fecha fin    | {end_dt.strftime('%Y-%m-%d %H:%M:%S')}")
+        summary(summary_path, f"Duración(s)  | {dur:.1f}")
+        try:
+            run_log_f.close()
+        except Exception:
+            pass
+        sys.exit(4)
 
     # Limpieza previa SOLO para TAG del día (evita acumulado entre cortes)
     limpieza_previa_en_varias_rutas(
