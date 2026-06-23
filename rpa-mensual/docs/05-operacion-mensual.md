@@ -64,7 +64,7 @@ Refresh: REFRESH_MENSUAL_ACTUAL OK
 Duracion: 2951.4 segundos
 ```
 
-Nota: la diferencia `Input=104` y `Publicados=105` debe investigarse antes de modificar la logica de publicacion. El publicador mensual selecciona archivos por periodo en la carpeta temporal; si existe un archivo adicional del mismo periodo, puede publicarse aunque no venga del set de centros seleccionado en esa corrida.
+Nota investigada: la diferencia `Input=104` y `Publicados=105` fue causada por el archivo `436_20260601_20260630_PacCitCExt.txt`. Ese centro no estaba en la lista `TOTAL_OK` del run y no fue registrado en `raw.archivo_descargado` para la corrida revisada. La mejora aplicada filtra publicacion por centros descargados correctamente y registra `FINAL_PUBLISH_SKIP_UNEXPECTED_FILES` si aparece un archivo sobrante del periodo.
 
 ## Publicacion observada
 
@@ -85,3 +85,24 @@ La carpeta diaria no es la misma que la carpeta mensual. El diario publica en la
 6. Confirmar `MAIL_SEND_OK`.
 7. Revisar warnings `DB_FILE_WARN`, `SCHEMA_DRIFT`, `FINAL_PUBLISH_MIRROR_FAIL`.
 8. Comparar `TOTAL_OK` contra `final_files`; si no coinciden, revisar si hay archivos sobrantes del periodo en la carpeta temporal.
+
+## Cierre de mes
+
+El cierre mensual se ejecuta cuando se necesita consolidar historico de un periodo. Normalmente se hace en los primeros dias del mes siguiente para cerrar el mes anterior, pero puede ejecutarse el ultimo dia del mes por indicacion de direccion.
+
+Comando de referencia:
+
+```bash
+cd /home/cenate/rpa_cext_diario
+source .venv/bin/activate
+MES_A_PROCESAR=2026-05 CLOSE_MONTH=true CLOSE_MONTH_PERIOD=2026-05 ENV_FILE=.env_mensual python -u RPA_CEXT_PROD_MENSUAL.py
+```
+
+Objetivos del cierre:
+
+- Descargar nuevamente todas las IPRESS del periodo.
+- Republicar archivos para Observatorio y BI.
+- Reflejar correcciones operativas, por ejemplo atenciones cerradas tarde por profesionales.
+- Ejecutar rutinas de BD para guardar historico mensual cerrado.
+
+La corrida mensual diaria normal no guarda historico completo cada dia para evitar crecimiento innecesario de almacenamiento.

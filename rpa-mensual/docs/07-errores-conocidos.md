@@ -28,19 +28,23 @@ El parser CSV de Python encuentra un campo individual mayor al limite por defect
 
 **Accion recomendada:**
 
-- Evaluar aumentar `csv.field_size_limit`.
+- Aumentar `csv.field_size_limit`.
 - Registrar el archivo como no cargado a staging si falla.
 - Validar si el refresh mensual depende de ese archivo cargado o de la publicacion TXT.
 
 ## Falla de ChromeDriver
 
-El mensual actualmente crea ChromeDriver directamente y envia logs de ChromeDriver a `os.devnull`. Si se presenta el mismo problema masivo que ocurrio en el diario, el log puede no incluir detalle suficiente.
+El mensual incorpora preflight de ChromeDriver y logs por intento. Si aparece falla, revisar:
+
+```text
+<CHROME_PROFILE_BASE_DIR>/chromedriver_logs/
+```
 
 **Accion recomendada:**
 
-- Migrar el preflight de ChromeDriver del RPA Diario.
-- Generar logs por intento en `tmp_chrome/chromedriver_logs`.
-- Limitar arranque concurrente de drivers si aparecen fallas intermitentes.
+- Confirmar `CHROMEDRIVER_PREFLIGHT_OK`.
+- Revisar `DRIVER_START_FAIL`.
+- Mantener `MAX_CONCURRENT_DRIVER_STARTS=1` si aparecen fallas intermitentes.
 
 ## Timer con `Persistent=true`
 
@@ -63,4 +67,3 @@ La carpeta final puede quedar con un mes incompleto si se acepta una corrida par
 
 - Definir si mensual debe bloquear publicacion cuando `TOTAL_FAIL > 0`.
 - Si la politica exige mes completo, ajustar la condicion de publicacion.
-

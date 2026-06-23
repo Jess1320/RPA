@@ -96,10 +96,12 @@ Validaciones aplicadas:
 Cuando hay al menos un centro OK:
 
 1. Busca archivos del periodo en la carpeta temporal.
-2. Copia a staging local dentro del padre de la carpeta final.
-3. Elimina de la carpeta final solo los archivos del mismo periodo.
-4. Mueve el nuevo lote a la carpeta final.
-5. Repite la operacion para cada mirror configurado.
+2. Filtra los archivos para publicar solo centros descargados correctamente en la corrida.
+3. Si encuentra archivos del periodo fuera de la lista esperada, registra `FINAL_PUBLISH_SKIP_UNEXPECTED_FILES`.
+4. Copia a staging local dentro del padre de la carpeta final.
+5. Elimina de la carpeta final solo los archivos del mismo periodo.
+6. Mueve el nuevo lote a la carpeta final.
+7. Repite la operacion para cada mirror configurado.
 
 ## Refresh y cierre
 
@@ -111,3 +113,4 @@ Si el estado final es `SUCCESS` o `PARTIAL_SUCCESS`:
 4. Ejecuta poda de staging mensual con `prune_stg_cext_prod_mensual_keep_run`.
 5. Si `CLOSE_MONTH=true`, archiva raw mensual cerrado y llama cierre de periodo mensual.
 
+El cierre mensual se usa cuando se requiere consolidar historico del periodo. La corrida normal diaria del mensual no archiva historico completo cada dia para evitar crecimiento innecesario de almacenamiento.

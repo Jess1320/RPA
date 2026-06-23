@@ -15,19 +15,20 @@ La ultima ejecucion revisada fue exitosa a nivel operativo:
 
 ## Diferencias de robustez frente al diario
 
-El mensual todavia no incluye algunas protecciones recientes incorporadas al diario:
+El mensual fue actualizado para incorporar protecciones operativas recientes del diario sin cambiar la funcionalidad de descarga:
 
-- Wrapper sin `flock`.
-- Wrapper sin log de orquestador.
-- Sin validacion explicita de ruta compartida antes de ejecutar.
-- Sin preflight de ChromeDriver antes de limpiar/descargar.
-- Sin logs de ChromeDriver por intento.
+- Wrapper con `flock`.
+- Log de orquestador.
+- Validacion de rutas compartidas de publicacion.
+- Preflight de ChromeDriver antes de limpiar/descargar.
+- Logs de ChromeDriver por intento.
+- Limite `MAX_CONCURRENT_DRIVER_STARTS`.
 
-Como el mensual corre una vez al dia y no ha presentado fallas frecuentes, no es urgente tocar produccion, pero conviene llevar estas mejoras en una rama controlada.
+Estas mejoras agregan pocos segundos al inicio y evitan fallas silenciosas o solapamientos.
 
 ## Fallback tecnico posiblemente mal ubicado
 
-En la funcion `ejecutar_descargas_por_macro`, los errores tecnicos como `TIMEOUT_DESCARGA_PREFIJO`, `ARCHIVO_NO_ESTABLE`, `ARCHIVO_VACIO` o `EXCEPTION:*` parecen evaluarse en un `elif` asociado al caso `status == OK`. Eso hace que esos errores no entren al fallback tecnico como probablemente se pretendia.
+En la funcion `ejecutar_descargas_por_macro`, los errores tecnicos como `TIMEOUT_DESCARGA_PREFIJO`, `ARCHIVO_NO_ESTABLE`, `ARCHIVO_VACIO` o `EXCEPTION:*` estaban evaluados en un `elif` asociado al caso `status == OK`. Eso hacia que esos errores no entraran al fallback tecnico como probablemente se pretendia.
 
 Impacto:
 
@@ -36,7 +37,7 @@ Impacto:
 
 Recomendacion:
 
-- Corregir la condicion para que los motivos tecnicos se evaluen dentro de `status != OK`.
+- Corregido: los motivos tecnicos se evaluan dentro de `status != OK`.
 - Agregar prueba o verificacion con resultado simulado.
 
 ## Warning de staging por campo grande
@@ -45,7 +46,7 @@ Existe evidencia de un archivo mensual descargado correctamente pero con fallo a
 
 Recomendacion:
 
-- Agregar `csv.field_size_limit` alto al inicio del proceso.
+- Aplicado: `csv.field_size_limit` alto al inicio del proceso.
 - Si falla staging de un archivo, registrar estado final del archivo con claridad.
 - Decidir si un `DB_FILE_WARN` debe degradar `SUCCESS` a `PARTIAL_SUCCESS`.
 
@@ -64,8 +65,14 @@ En la corrida revisada hubo `TOTAL_OK=104`, pero `FINAL_PUBLISH_RESULT` reporto 
 
 La funcion de publicacion mensual selecciona archivos por rango de fechas del periodo en la carpeta temporal, no exclusivamente por la lista de centros descargados en la corrida. Si queda un archivo adicional del mismo periodo en temporal, puede entrar al lote publicado.
 
-Recomendacion:
+Causa confirmada:
 
-- Antes de publicar, filtrar por centros esperados de la corrida.
-- Registrar alerta cuando `final_files != TOTAL_OK`.
-- Revisar la carpeta temporal si vuelve a aparecer diferencia entre centros OK y archivos publicados.
+- El archivo extra fue `436_20260601_20260630_PacCitCExt.txt`.
+- No pertenecia al input del run.
+- No fue registrado en `raw.archivo_descargado`.
+
+Correccion aplicada:
+
+- La publicacion mensual filtra por centros descargados correctamente.
+- Los archivos sobrantes del periodo se omiten.
+- Se registra `FINAL_PUBLISH_SKIP_UNEXPECTED_FILES`.

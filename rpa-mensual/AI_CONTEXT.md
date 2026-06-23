@@ -53,4 +53,21 @@ Ejecucion `RUN_CEXT_PROD_MENSUAL_20260623_040037`:
 - Refresh mensual: OK.
 - Duracion: `2951.4` segundos.
 - Warning observado: `DB_FILE_WARN` en archivo `406_20260601_20260630_PacCitCExt.txt` por campo mayor a `131072`.
+- Archivo extra investigado: `436_20260601_20260630_PacCitCExt.txt`; no pertenecia al input de 104 centros y fue publicado por estar en el periodo.
 
+## Cierre mensual
+
+El cierre mensual se usa para reprocesar un periodo completo, normalmente el mes anterior durante los primeros dias del mes nuevo, aunque puede ejecutarse el ultimo dia por solicitud de direccion.
+
+Comando operativo conocido:
+
+```bash
+cd /home/cenate/rpa_cext_diario
+source .venv/bin/activate
+MES_A_PROCESAR=2026-05 CLOSE_MONTH=true CLOSE_MONTH_PERIOD=2026-05 ENV_FILE=.env_mensual python -u RPA_CEXT_PROD_MENSUAL.py
+```
+
+El cierre mensual tiene dos objetivos:
+
+- Operativo: republicar archivos para Observatorio/BI tras validaciones de coordinadores y correcciones de atenciones medicas.
+- Base de datos: archivar el mes cerrado como historico, porque la corrida diaria mensual normal solo mantiene el periodo vigente sin guardar historico completo cada dia.

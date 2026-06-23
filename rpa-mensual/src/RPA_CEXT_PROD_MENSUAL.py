@@ -10,9 +10,9 @@ import hashlib
 import json
 import unicodedata
 import socket
+import sys
 from db_pg import PgRPAControl, parse_file_metadata
 import os
-import sys
 import time
 import datetime
 from calendar import monthrange
@@ -29,6 +29,14 @@ import shutil
 from pathlib import Path
 import re
 import random
+
+_CSV_FIELD_LIMIT = sys.maxsize
+while True:
+    try:
+        csv.field_size_limit(_CSV_FIELD_LIMIT)
+        break
+    except OverflowError:
+        _CSV_FIELD_LIMIT //= 10
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -50,6 +58,20 @@ from oauth2client.service_account import ServiceAccountCredentials
 # Señales / Cancelación
 # =========================
 STOP_EVENT = threading.Event()
+DRIVER_START_SEMAPHORE = threading.BoundedSemaphore(2)
+DRIVER_START_LIMIT = 2
+
+
+def set_driver_start_limit(limit: int) -> None:
+    global DRIVER_START_SEMAPHORE, DRIVER_START_LIMIT
+    try:
+        limit = int(limit)
+    except Exception:
+        limit = 2
+    if limit <= 0:
+        limit = 1
+    DRIVER_START_LIMIT = limit
+    DRIVER_START_SEMAPHORE = threading.BoundedSemaphore(limit)
 
 
 def handle_signal(signum, frame):
@@ -1303,14 +1325,122 @@ def build_chrome_options(download_dir_primary: str, headless: bool, profile_base
     return chrome_options, profile_dir
 
 
-def build_chrome_service() -> ChromeService:
-    service = ChromeService(executable_path="/usr/bin/chromedriver", log_output=os.devnull)
+def _safe_log_token(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value or "unknown"))[:80]
+
+
+def _tail_text(path: str, max_chars: int = 1200) -> str:
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            data = f.read()
+        data = " ".join(data.split())
+        if len(data) > max_chars:
+            return "..." + data[-max_chars:]
+        return data
+    except Exception:
+        return ""
+
+
+def _chromedriver_log_path(profile_base_dir: str, user: str, center_code: str, startup_attempt: int) -> str:
+    log_dir = os.path.join(profile_base_dir, "chromedriver_logs")
+    os.makedirs(log_dir, exist_ok=True)
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    return os.path.join(
+        log_dir,
+        f"chromedriver_{ts}_{_safe_log_token(user)}_{_safe_log_token(center_code)}_{startup_attempt}.log"
+    )
+
+
+def build_chrome_service(log_path: Optional[str] = None) -> ChromeService:
+    service = ChromeService(executable_path="/usr/bin/chromedriver", log_output=log_path or os.devnull)
     try:
         import subprocess as _sp
         service.creationflags = _sp.CREATE_NO_WINDOW
     except Exception:
         pass
     return service
+
+
+def create_webdriver_with_retry(
+    chrome_options,
+    user: str,
+    center_code: str,
+    profile_base_dir: str,
+    startup_tries: int = 3
+):
+    last_exc = None
+    for startup_attempt in range(1, startup_tries + 1):
+        if STOP_EVENT.is_set():
+            raise RuntimeError("CANCELADO")
+
+        log_path = _chromedriver_log_path(profile_base_dir, user, center_code, startup_attempt)
+
+        with DRIVER_START_SEMAPHORE:
+            try:
+                driver = webdriver.Chrome(
+                    options=chrome_options,
+                    service=build_chrome_service(log_path=log_path)
+                )
+                if startup_attempt > 1:
+                    print(
+                        f"INFO | DRIVER_START_OK_RETRY | {user} | {center_code} | startup_attempt={startup_attempt}",
+                        flush=True
+                    )
+                return driver
+            except Exception as e:
+                last_exc = e
+                detail = f"{type(e).__name__}: {e}"
+                driver_log_tail = _tail_text(log_path)
+                if driver_log_tail:
+                    detail = f"{detail} | chromedriver_log={log_path} | tail={driver_log_tail}"
+                else:
+                    detail = f"{detail} | chromedriver_log={log_path}"
+                print(
+                    f"WARN | DRIVER_START_FAIL | {user} | {center_code} | startup_attempt={startup_attempt}/{startup_tries} | {detail}",
+                    flush=True
+                )
+
+        if startup_attempt < startup_tries:
+            time.sleep(min(10.0, 2.0 * startup_attempt + random.random()))
+
+    if last_exc:
+        raise last_exc
+    raise RuntimeError("No se pudo iniciar ChromeDriver")
+
+
+def preflight_chromedriver(download_dir_primary: str, headless: bool, profile_base_dir: str, summary_path: str) -> bool:
+    profile_dir = ""
+    driver = None
+    try:
+        chrome_options, profile_dir = build_chrome_options(
+            download_dir_primary,
+            headless=headless,
+            profile_base_dir=profile_base_dir
+        )
+        driver = create_webdriver_with_retry(
+            chrome_options=chrome_options,
+            user="PREFLIGHT",
+            center_code="CHROMEDRIVER",
+            profile_base_dir=profile_base_dir,
+            startup_tries=2
+        )
+        driver.get("about:blank")
+        summary(summary_path, "CHROMEDRIVER_PREFLIGHT_OK")
+        return True
+    except Exception as e:
+        summary(summary_path, f"CHROMEDRIVER_PREFLIGHT_FAIL | {type(e).__name__}: {e}")
+        return False
+    finally:
+        try:
+            if driver:
+                driver.quit()
+        except Exception:
+            pass
+        try:
+            if profile_dir and os.path.isdir(profile_dir):
+                shutil.rmtree(profile_dir, ignore_errors=True)
+        except Exception:
+            pass
 
 
 # =========================
@@ -1515,6 +1645,7 @@ def publish_month_txts_to_final_dir(
     period_last_ymd: str,
     file_suffix: str,
     summary_path: str,
+    expected_centers: Optional[List[str]] = None,
     db=None,
     run_db_id: Optional[int] = None
 ) -> bool:
@@ -1526,11 +1657,34 @@ def publish_month_txts_to_final_dir(
             )
             return False
 
-        files = [
+        expected_set = set()
+        if expected_centers:
+            expected_set = {_canon_code(c) for c in expected_centers if str(c or "").strip()}
+
+        all_period_files = [
             f for f in os.listdir(temp_dir)
             if _monthly_file_matches_period(f, period_first_ymd, period_last_ymd, file_suffix)
         ]
+        skipped_unexpected = []
+        files = []
+        for f in all_period_files:
+            code = f.split("_", 1)[0]
+            if expected_set and _canon_code(code) not in expected_set:
+                skipped_unexpected.append(f)
+                continue
+            files.append(f)
         files = sorted(files)
+        skipped_unexpected = sorted(skipped_unexpected)
+
+        if skipped_unexpected:
+            emit_event(
+                summary_path,
+                db,
+                run_db_id,
+                "WARN",
+                "FINAL_PUBLISH_SKIP_UNEXPECTED_FILES",
+                f"period={period_first_ymd}_{period_last_ymd} | skipped={skipped_unexpected}"
+            )
 
         if not files:
             emit_event(
@@ -1657,9 +1811,11 @@ def descargar_centro(
                 headless=headless,
                 profile_base_dir=PROFILE_BASE_DIR
             )
-            driver = webdriver.Chrome(
-                options=chrome_options,
-                service=build_chrome_service()
+            driver = create_webdriver_with_retry(
+                chrome_options=chrome_options,
+                user=user,
+                center_code=center_code,
+                profile_base_dir=PROFILE_BASE_DIR
             )
 
             driver.get(URL_HOME)
@@ -1955,9 +2111,12 @@ def check_user_health(
             headless=headless,
             profile_base_dir=PROFILE_BASE_DIR
         )
-        driver = webdriver.Chrome(
-            options=chrome_options,
-            service=build_chrome_service()
+        driver = create_webdriver_with_retry(
+            chrome_options=chrome_options,
+            user=user,
+            center_code="HEALTHCHECK",
+            profile_base_dir=PROFILE_BASE_DIR,
+            startup_tries=2
         )
 
         driver.get(URL_HOME)
@@ -2200,23 +2359,22 @@ def ejecutar_descargas_por_macro(
             motivo = str(r.get("motivo", ""))
 
             if r["status"] != "OK":
-               if motivo == "NO_ENCONTRADO_EN_WEB":
-                   pendientes_fallback.append({
-                      "centro": r["centro"],
-                      "macro_objetivo": macro,
-                      "motivo_original": motivo,
-                      "retry_same_macro": False,
-                      "allow_override_learn": True
-                   })
-
-            elif motivo in ("TIMEOUT_DESCARGA_PREFIJO", "ARCHIVO_NO_ESTABLE", "ARCHIVO_VACIO") or motivo.startswith("EXCEPTION:"):
-                 pendientes_fallback.append({
-                      "centro": r["centro"],
-                      "macro_objetivo": macro,
-                      "motivo_original": motivo,
-                      "retry_same_macro": True,
-                      "allow_override_learn": False
-                 })
+                if motivo == "NO_ENCONTRADO_EN_WEB":
+                    pendientes_fallback.append({
+                        "centro": r["centro"],
+                        "macro_objetivo": macro,
+                        "motivo_original": motivo,
+                        "retry_same_macro": False,
+                        "allow_override_learn": True
+                    })
+                elif motivo in ("TIMEOUT_DESCARGA_PREFIJO", "ARCHIVO_NO_ESTABLE", "ARCHIVO_VACIO") or motivo.startswith("EXCEPTION:"):
+                    pendientes_fallback.append({
+                        "centro": r["centro"],
+                        "macro_objetivo": macro,
+                        "motivo_original": motivo,
+                        "retry_same_macro": True,
+                        "allow_override_learn": False
+                    })
 
         summary(summary_path, f"MACRO_END | {macro} | OK={len(ok)} | FAIL={len(fail)}")
 
@@ -2422,6 +2580,7 @@ def load_config_from_env() -> dict:
     BETWEEN_CENTERS_DELAY = _env_int("BETWEEN_CENTERS_DELAY", "2")
     RETRY_PER_CENTER = _env_int("RETRY_PER_CENTER", "1")
     MAX_THREADS = _env_int("MAX_THREADS", "6")
+    MAX_CONCURRENT_DRIVER_STARTS = _env_int("MAX_CONCURRENT_DRIVER_STARTS", "1")
 
     # Logs
     LOGS_DIR = _env_str("LOGS_DIR", "logs")
@@ -2551,6 +2710,7 @@ def load_config_from_env() -> dict:
         "BETWEEN_CENTERS_DELAY": int(BETWEEN_CENTERS_DELAY),
         "RETRY_PER_CENTER": int(RETRY_PER_CENTER),
         "MAX_THREADS": int(MAX_THREADS),
+        "MAX_CONCURRENT_DRIVER_STARTS": int(MAX_CONCURRENT_DRIVER_STARTS),
 
         "LOGS_DIR": LOGS_DIR,
         "RUN_NAME": RUN_NAME,
@@ -2771,6 +2931,7 @@ def main():
     BETWEEN_CENTERS_DELAY = cfg["BETWEEN_CENTERS_DELAY"]
     RETRY_PER_CENTER = cfg["RETRY_PER_CENTER"]
     MAX_THREADS = cfg["MAX_THREADS"]
+    set_driver_start_limit(cfg.get("MAX_CONCURRENT_DRIVER_STARTS", 1))
     TABS = cfg["GSHEET_TABS"]
     HEADLESS = cfg["HEADLESS"]
     FILE_SUFFIX = cfg["FILE_SUFFIX"]
@@ -2999,10 +3160,33 @@ def main():
         print(f"Ruta publish  : {FINAL_PUBLISH_DIR}", flush=True)
         print(f"Mirrors       : {FINAL_PUBLISH_MIRRORS}", flush=True)
         print(f"Profile base  : {PROFILE_BASE_DIR}", flush=True)
+        print(f"Driver starts : {cfg['MAX_CONCURRENT_DRIVER_STARTS']}", flush=True)
         print(f"Healthcheck   : enabled={HEALTHCHECK_ENABLED} | blocking={HEALTHCHECK_BLOCKING}", flush=True)
         print(f"MACRO_USERS   : { {k: v[0] for k, v in MACRO_USERS.items()} }", flush=True)
         print(f"INPUT | Centros (checks merge) ({len(centros_meta)}): {centros_meta}", flush=True)
         print("===================================\n", flush=True)
+
+        summary(summary_path, f"MAX_CONCURRENT_DRIVER_STARTS | {cfg['MAX_CONCURRENT_DRIVER_STARTS']}")
+
+        if not preflight_chromedriver(DOWNLOAD_DIR_PRIMARY, HEADLESS, PROFILE_BASE_DIR, summary_path):
+            failure_stage = "CHROMEDRIVER_PREFLIGHT"
+            failure_detail = "ChromeDriver no pudo iniciar antes de limpiar o descargar."
+            overall_exit = max(overall_exit, 4)
+            if db and run_db_id:
+                try:
+                    db.log_event(run_db_id, "ERROR", "CHROMEDRIVER_PREFLIGHT_FAIL", failure_detail)
+                    db.finish_run(
+                        id_run=run_db_id,
+                        estado="FAILED",
+                        total_input=len(centros_meta),
+                        total_ok=0,
+                        total_fail=len(centros_meta),
+                        duration_seconds=(datetime.datetime.now() - start_dt).total_seconds(),
+                        observacion=failure_detail
+                    )
+                except Exception as e:
+                    print(f"DB_FINISH_WARN | {type(e).__name__}: {e}", flush=True)
+            continue
 
         limpieza_previa_en_varias_rutas(
             DOWNLOAD_DIR_LIST,
@@ -3128,6 +3312,7 @@ def main():
                     period_last_ymd=end_target.strftime("%Y%m%d"),
                     file_suffix=FILE_SUFFIX,
                     summary_path=summary_path,
+                    expected_centers=descargados_total_ordenado,
                     db=db,
                     run_db_id=run_db_id
                 )
@@ -3151,6 +3336,7 @@ def main():
                             period_last_ymd=end_target.strftime("%Y%m%d"),
                             file_suffix=FILE_SUFFIX,
                             summary_path=summary_path,
+                            expected_centers=descargados_total_ordenado,
                             db=db,
                             run_db_id=run_db_id
                         )

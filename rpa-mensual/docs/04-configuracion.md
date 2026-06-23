@@ -23,6 +23,7 @@ Produccion usa `.env_mensual` en `/home/cenate/rpa_cext_diario`. Ese archivo no 
 | `HEADLESS` | Ejecuta navegador sin UI |
 | `DOWNLOAD_TIMEOUT` | Timeout por descarga |
 | `MAX_THREADS` | Paralelismo por macro |
+| `MAX_CONCURRENT_DRIVER_STARTS` | Limite de arranques simultaneos de ChromeDriver |
 | `HEALTHCHECK_ENABLED` | Activa validacion previa de usuario/macro |
 | `HEALTHCHECK_BLOCKING` | Bloquea macro si credencial falla |
 | `DB_PRECHECK_ENABLED` | Valida puerto PostgreSQL antes de correr |
@@ -60,3 +61,20 @@ Unit=rpa-cext-mensual.service
 
 `Persistent=true` implica que, si el timer estuvo apagado y se reactiva despues de un horario perdido, systemd puede disparar una ejecucion inmediata.
 
+## Ejecucion de cierre mensual
+
+Ejemplo operativo:
+
+```bash
+cd /home/cenate/rpa_cext_diario
+source .venv/bin/activate
+MES_A_PROCESAR=2026-05 CLOSE_MONTH=true CLOSE_MONTH_PERIOD=2026-05 ENV_FILE=.env_mensual python -u RPA_CEXT_PROD_MENSUAL.py
+```
+
+Uso:
+
+- Reprocesar un mes completo despues de validaciones del Observatorio.
+- Actualizar archivos que alimentan BI institucional.
+- Guardar historico cerrado en BD.
+
+Antes de ejecutarlo durante el dia, validar que no exista una corrida mensual en curso.
