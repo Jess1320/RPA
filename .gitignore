@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Secrets
+.env
+*.env
+!.env.example
+config/*.json
+!config/*.example.json
+**/config/*.json
+!**/config/*.example.json
+
+# Logs and runtime artifacts
+logs/
+**/logs/
+*.log
+*.tmp
+tmp/
+temp/
+downloads/
+**/downloads/
+DIARIAS_TMP/
+
+# RPA output files
+*.csv
+*.xlsx
+*.xls
+*.txt
+!README.md
+!AI_CONTEXT.md
+!docs/**/*.md
+!docs/**/*.txt
+!**/docs/**/*.md
+!**/docs/**/*.txt
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
