@@ -9,7 +9,7 @@ PROJECT_DIR="/home/cenate/rpa_cext_diario"
 PYTHON_BIN="$PROJECT_DIR/.venv/bin/python"
 SCRIPT_PATH="$PROJECT_DIR/RPA_CEXT_PROD_DIARIO.py"
 LOCK_FILE="/tmp/rpa_cext_diario.lock"
-SHARE_MOUNT="/mnt/abandonos"
+SHARE_PATH="/mnt/abandonos/BASES_DIARIAS"
 ORCH_LOG_DIR="$PROJECT_DIR/orchestrator_logs"
 ORCH_LOG_FILE="$ORCH_LOG_DIR/orchestrator_$(date +%Y%m%d).log"
 
@@ -29,8 +29,8 @@ if [[ ! -f "$SCRIPT_PATH" ]]; then
   exit 22
 fi
 
-if ! mountpoint -q "$SHARE_MOUNT"; then
-  echo "$(date '+%F %T') | ERROR | La ruta compartida no esta montada: $SHARE_MOUNT"
+if [[ ! -d "$SHARE_PATH" || ! -w "$SHARE_PATH" ]]; then
+  echo "$(date '+%F %T') | ERROR | La ruta compartida no esta disponible para escritura: $SHARE_PATH"
   exit 23
 fi
 
