@@ -67,3 +67,20 @@ La carpeta final puede quedar con un mes incompleto si se acepta una corrida par
 
 - Definir si mensual debe bloquear publicacion cuando `TOTAL_FAIL > 0`.
 - Si la politica exige mes completo, ajustar la condicion de publicacion.
+
+## Filas omitidas por interpretacion de comillas en TXT
+
+**Sintoma:**
+
+- El TXT abierto en Excel muestra registros que no aparecen en staging mensual.
+- La cantidad de filas cargadas es menor que la cantidad real de lineas del TXT.
+- Un profesional aparece en el archivo crudo, pero no aparece al consultar la base.
+
+**Causa probable:**
+
+El archivo de ExplotaDatos es texto delimitado plano por `|`. Si Python lo interpreta como CSV estandar, una comilla no balanceada dentro de un campo puede unir varias lineas y omitir registros.
+
+**Accion recomendada:**
+
+- Leer los TXT con `quoting=csv.QUOTE_NONE`.
+- Reprocesar el periodo afectado si la diferencia impacta reportes o cierre mensual.

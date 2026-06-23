@@ -516,7 +516,7 @@ def procesar_txt_a_staging(
 
         delimiter = detect_delimiter(first_line)
         f.seek(0)
-        reader = csv.reader(f, delimiter=delimiter)
+        reader = csv.reader(f, delimiter=delimiter, quoting=csv.QUOTE_NONE)
 
         header_original = next(reader)
         header_normalized = [normalize_header_name(h) for h in header_original]

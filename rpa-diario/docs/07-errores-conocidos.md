@@ -127,3 +127,25 @@ El TXT contiene un campo muy largo y el limite por defecto del parser CSV de Pyt
 
 - Mantener ampliado `csv.field_size_limit` en el script diario.
 - Reejecutar el RPA o recargar el archivo afectado para que staging y las vistas se actualicen.
+
+## Filas omitidas por interpretacion de comillas en TXT
+
+**Sintoma:**
+
+- El TXT abierto en Excel muestra registros que no aparecen en `stg.cext_prod_diario` ni en las vistas.
+- La cantidad de filas cargadas a staging es menor que la cantidad real de lineas del TXT.
+- Al buscar un profesional por `DNI_MEDICO`, el TXT crudo contiene registros, pero la base devuelve cero.
+
+**Causa probable:**
+
+El archivo de ExplotaDatos es un texto delimitado plano por `|`. Si Python lo lee como CSV estandar, una comilla no balanceada dentro de algun campo puede hacer que el parser una varias lineas y omita registros posteriores.
+
+**Validacion:**
+
+- Comparar el conteo con `csv.reader(..., quoting=csv.QUOTE_NONE)` contra el parser estandar.
+- Revisar el TXT crudo por columna, no solo por busqueda global del documento.
+
+**Accion recomendada:**
+
+- Leer los TXT de ExplotaDatos con `quoting=csv.QUOTE_NONE`.
+- Reprocesar o esperar una nueva corrida para que staging y las vistas reflejen todas las filas.
