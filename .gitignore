@@ -32,6 +32,8 @@ DIARIAS_TMP/
 *.xlsx
 *.xls
 *.txt
+!requirements.txt
+!**/requirements.txt
 !README.md
 !AI_CONTEXT.md
 !docs/**/*.md
@@ -44,4 +46,3 @@ DIARIAS_TMP/
 Thumbs.db
 .idea/
 .vscode/
-

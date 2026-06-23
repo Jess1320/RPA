@@ -2,9 +2,10 @@
 
 ## Prioridad 0
 
-- Mover el calculo de `final_status` al final real de la corrida.
-- Usar una funcion unica para derivar estado.
-- Calcular duracion despues de todas las etapas obligatorias.
+- Mover el calculo de `final_status` al final real de la corrida. Preparado en version controlada.
+- Usar una funcion unica para derivar estado. Preparado en version controlada.
+- Calcular duracion despues de todas las etapas obligatorias. Preparado en version controlada.
+- Restaurar bloqueo `flock` y validacion de mount en el wrapper. Preparado en version controlada.
 - Registrar version y hash del codigo.
 - Registrar inicio y fin de cada etapa.
 
@@ -42,4 +43,3 @@
 - Usar IA solo para diagnostico.
 - Clasificar errores y resumir logs.
 - Mantener `state_change_authorized = false` para diagnosticos generados por IA.
-

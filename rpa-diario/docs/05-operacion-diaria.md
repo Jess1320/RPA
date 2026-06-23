@@ -18,6 +18,14 @@ O, si se ejecuta por wrapper:
 /home/cenate/rpa_cext_diario/run_rpa_diario.sh
 ```
 
+El wrapper versionado valida:
+
+- Existencia del Python del entorno virtual.
+- Existencia del script principal.
+- Montaje de `/mnt/abandonos`.
+- Bloqueo exclusivo con `flock`.
+- Registro en `orchestrator_logs`.
+
 ## Validacion de una corrida correcta
 
 Una corrida correcta debe cumplir:
@@ -31,6 +39,8 @@ Una corrida correcta debe cumplir:
 - `data_ready = true`.
 - Correo enviado o registrado como warning no critico.
 
+En una corrida con descargas y publicacion correctas debe aparecer en `summary.log` un evento `REFRESH_REPORTES_DIARIO` antes de `RUN_END`. Si aparece `REFRESH_REPORTES_DIARIO_SKIP`, revisar el motivo indicado.
+
 ## Revision ante falla
 
 1. Revisar log de corrida.
@@ -40,4 +50,3 @@ Una corrida correcta debe cumplir:
 5. Validar si hay archivos temporales incompletos.
 6. Confirmar si la carpeta compartida fue publicada.
 7. Revisar si hubo timeout, falla de ChromeDriver, cambio de cabecera o error de credenciales.
-
