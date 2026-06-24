@@ -25,6 +25,7 @@ El wrapper versionado valida:
 - Montaje de `/mnt/abandonos`.
 - Bloqueo exclusivo con `flock`.
 - Registro en `orchestrator_logs`.
+- Reintento automatico controlado si el script sale con codigo `4` por `CHROMEDRIVER_PREFLIGHT_FAIL`.
 
 ## Validacion de una corrida correcta
 
@@ -44,6 +45,14 @@ En una corrida con descargas y publicacion correctas debe aparecer en `summary.l
 Antes de limpiar archivos o iniciar descargas, la version controlada ejecuta un preflight de ChromeDriver. Si falla, se registra `CHROMEDRIVER_PREFLIGHT_FAIL` y la corrida termina sin borrar los archivos del TAG.
 
 Si el preflight de ChromeDriver falla, la corrida debe quedar como `FAILED`, registrar alerta `CHROMEDRIVER_PREFLIGHT_FAIL` y enviar correo con el log adjunto. Si no llega correo, revisar `MAIL_SEND_WARN` o `MAIL_SEND_SKIP` en `run.log`.
+
+Como escudo operativo, el wrapper relanza una vez la corrida cuando el Python termina con codigo `4`, reservado para fallo temprano de preflight. El reintento ocurre antes de cualquier limpieza o descarga efectiva del segundo intento. No reintenta fallas de descarga, staging, publicacion, refresh ni base de datos.
+
+Variables del wrapper:
+
+- `PREFLIGHT_RETRY_EXIT_CODE`: codigo que dispara reintento; por defecto `4`.
+- `PREFLIGHT_RETRY_MAX`: cantidad de reintentos luego del primer intento; por defecto `1`.
+- `PREFLIGHT_RETRY_DELAY_SECONDS`: espera antes del reintento; por defecto `90`.
 
 ## Revision ante falla
 

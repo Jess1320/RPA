@@ -97,6 +97,7 @@ Inestabilidad del entorno Chromium/ChromeDriver bajo ejecucion automatica, espec
 - Usar wrapper con `flock` para impedir solapamiento entre corrida automatica y manual.
 - Ejecutar preflight de ChromeDriver antes de limpiar archivos o descargar.
 - Mantener varios reintentos de arranque en preflight, porque la falla puede ser intermitente y resolverse segundos despues.
+- Relanzar automaticamente una vez desde el wrapper si el script termina con codigo `4`, reservado para `CHROMEDRIVER_PREFLIGHT_FAIL`.
 - Si el preflight falla, no continuar con los 104 centros.
 - Registrar alerta y enviar correo aun cuando la corrida termine durante el preflight.
 
