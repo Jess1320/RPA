@@ -46,13 +46,15 @@ Antes de limpiar archivos o iniciar descargas, la version controlada ejecuta un 
 
 Si el preflight de ChromeDriver falla, la corrida debe quedar como `FAILED`, registrar alerta `CHROMEDRIVER_PREFLIGHT_FAIL` y enviar correo con el log adjunto. Si no llega correo, revisar `MAIL_SEND_WARN` o `MAIL_SEND_SKIP` en `run.log`.
 
-Como escudo operativo, el wrapper relanza una vez la corrida cuando el Python termina con codigo `4`, reservado para fallo temprano de preflight. El reintento ocurre antes de cualquier limpieza o descarga efectiva del segundo intento. No reintenta fallas de descarga, staging, publicacion, refresh ni base de datos.
+Como escudo operativo, el wrapper relanza la corrida cuando el Python termina con codigo `4`, reservado para fallo temprano de preflight. El reintento ocurre antes de cualquier limpieza o descarga efectiva del siguiente intento. No reintenta fallas de descarga, staging, publicacion, refresh ni base de datos.
 
 Variables del wrapper:
 
 - `PREFLIGHT_RETRY_EXIT_CODE`: codigo que dispara reintento; por defecto `4`.
-- `PREFLIGHT_RETRY_MAX`: cantidad de reintentos luego del primer intento; por defecto `1`.
-- `PREFLIGHT_RETRY_DELAY_SECONDS`: espera antes del reintento; por defecto `90`.
+- `PREFLIGHT_RETRY_MAX`: cantidad de reintentos luego del primer intento; por defecto `2`.
+- `PREFLIGHT_RETRY_DELAY_SECONDS`: espera antes del reintento; por defecto `120`.
+
+Antes de cada relanzamiento por preflight, el wrapper limpia procesos `chromedriver` del usuario y perfiles temporales de preflight bajo `tmp_chrome` para reducir residuos del intento fallido.
 
 ## Revision ante falla
 
