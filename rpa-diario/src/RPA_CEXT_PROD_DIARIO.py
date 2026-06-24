@@ -1185,7 +1185,7 @@ def preflight_chromedriver(download_dir_primary: str, headless: bool, summary_pa
             chrome_options=chrome_options,
             user="PREFLIGHT",
             center_code="CHROMEDRIVER",
-            startup_tries=2
+            startup_tries=5
         )
         driver.get("about:blank")
         summary(summary_path, "CHROMEDRIVER_PREFLIGHT_OK")
