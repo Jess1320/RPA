@@ -51,10 +51,12 @@ Como escudo operativo, el wrapper relanza la corrida cuando el Python termina co
 Variables del wrapper:
 
 - `PREFLIGHT_RETRY_EXIT_CODE`: codigo que dispara reintento; por defecto `4`.
-- `PREFLIGHT_RETRY_MAX`: cantidad de reintentos luego del primer intento; por defecto `2`.
-- `PREFLIGHT_RETRY_DELAY_SECONDS`: espera antes del reintento; por defecto `120`.
+- `PREFLIGHT_RETRY_MAX`: cantidad de reintentos luego del primer intento; por defecto `4` (5 intentos totales).
+- `PREFLIGHT_RETRY_DELAY_SECONDS`: espera antes del reintento; por defecto `180`.
 
 Antes de cada relanzamiento por preflight, el wrapper limpia procesos `chromedriver` del usuario y perfiles temporales de preflight bajo `tmp_chrome` para reducir residuos del intento fallido.
+
+Durante los intentos intermedios el Python registra el fallo en log/BD, pero no envia correo. El correo de `CHROMEDRIVER_PREFLIGHT_FAIL` se reserva para el ultimo intento, cuando ya se agoto la recuperacion automatica del wrapper.
 
 El wrapper tambien evita corridas redundantes muy cercanas: si detecta una corrida completa con `TOTAL_FAIL=0`, publicacion final OK, refresh OK y `RUN_END` dentro de los ultimos `RECENT_SUCCESS_SKIP_MINUTES` minutos, salta la nueva ejecucion con salida exitosa. Por defecto son `10` minutos.
 
@@ -74,3 +76,4 @@ Para incidentes de ChromeDriver revisar tambien:
 - `tmp_chrome/chromedriver_logs/`
 - Conteo de procesos `chromedriver` y `chromium-browser`.
 - Variable `MAX_CONCURRENT_DRIVER_STARTS`; en produccion se recomienda `1`.
+- Variable `MAX_THREADS`; si hay inestabilidad de Chromium/ChromeDriver bajo systemd, bajar temporalmente de `6` a `3` reduce navegadores simultaneos con impacto moderado en tiempo de ejecucion.

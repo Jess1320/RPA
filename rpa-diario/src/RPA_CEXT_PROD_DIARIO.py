@@ -216,6 +216,16 @@ def _env_str(name: str, default: str = "") -> str:
     return _strip_key_prefix(s, name)
 
 
+def should_send_preflight_mail() -> bool:
+    try:
+        attempt = _env_int("RPA_ORCH_ATTEMPT", "1")
+        max_attempts = _env_int("RPA_ORCH_MAX_ATTEMPTS", "1")
+    except Exception:
+        return True
+
+    return attempt >= max_attempts
+
+
 # =========================
 # Log por corrida + retención
 # =========================
@@ -3213,7 +3223,8 @@ def main():
             smtp_to = [x.strip() for x in smtp_to.split(",") if x.strip()]
         smtp_cc = [x.strip() for x in os.getenv("SMTP_CC", "").split(",") if x.strip()]
 
-        if mail_enabled and smtp_to:
+        send_preflight_mail = should_send_preflight_mail()
+        if mail_enabled and smtp_to and send_preflight_mail:
             try:
                 try:
                     run_log_f.flush()
@@ -3262,7 +3273,10 @@ def main():
             except Exception as e:
                 print(f"MAIL_SEND_WARN | CHROMEDRIVER_PREFLIGHT_FAIL | {type(e).__name__}: {e}", flush=True)
         else:
-            print("MAIL_SEND_SKIP | CHROMEDRIVER_PREFLIGHT_FAIL | MAIL_DISABLED_OR_NO_RECIPIENTS", flush=True)
+            if not send_preflight_mail:
+                print("MAIL_SEND_SKIP | CHROMEDRIVER_PREFLIGHT_FAIL | ORCH_RETRY_PENDING", flush=True)
+            else:
+                print("MAIL_SEND_SKIP | CHROMEDRIVER_PREFLIGHT_FAIL | MAIL_DISABLED_OR_NO_RECIPIENTS", flush=True)
 
         try:
             run_log_f.close()
