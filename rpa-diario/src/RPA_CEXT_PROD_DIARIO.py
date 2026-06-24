@@ -2844,12 +2844,17 @@ def derive_final_status(
     if overall_exit == 130:
         return "CANCELLED"
 
+    if overall_exit != 0:
+        return "FAILED"
+
     if total_ok == 0 and total_fail > 0:
+        return "FAILED"
+
+    if not final_publish_ok:
         return "FAILED"
 
     if total_ok > 0 and (
         total_fail > 0
-        or not final_publish_ok
         or not refresh_diario_ok
         or not report_pendientes_ok
         or not report_futuro_ok

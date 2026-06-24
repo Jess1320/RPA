@@ -90,3 +90,5 @@ El refresh ya no depende de un `final_status` inicial o provisional. Se ejecuta 
 - La ejecucion no fue cancelada.
 
 Si el refresh no se ejecuta, el summary registra `REFRESH_REPORTES_DIARIO_SKIP` con un motivo explicito.
+
+Regla operativa adicional: si `final_publish_ok=false`, la corrida debe quedar `FAILED`, aunque haya descargado algunos centros. Las vistas operativas consideran `SUCCESS` y `PARTIAL_SUCCESS` como corridas elegibles; por eso una corrida sin publicacion final completa no debe quedar como `PARTIAL_SUCCESS`.

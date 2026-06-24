@@ -99,8 +99,11 @@ Inestabilidad del entorno Chromium/ChromeDriver bajo ejecucion automatica, espec
 - Mantener varios reintentos de arranque en preflight, porque la falla puede ser intermitente y resolverse segundos despues.
 - Relanzar automaticamente desde el wrapper si el script termina con codigo `4`, reservado para `CHROMEDRIVER_PREFLIGHT_FAIL`.
 - Limpiar procesos/perfiles temporales de Chrome del propio RPA antes de cada relanzamiento por preflight.
+- Evitar corridas automaticas redundantes si acaba de terminar una corrida completa exitosa, para dar enfriamiento al entorno Chromium/ChromeDriver.
 - Si el preflight falla, no continuar con los 104 centros.
 - Registrar alerta y enviar correo aun cuando la corrida termine durante el preflight.
+
+Si una corrida se corta despues del preflight con muy pocos centros descargados y sin publicacion final completa, su estado debe quedar `FAILED`. No debe quedar `PARTIAL_SUCCESS`, porque las vistas que toman la ultima corrida elegible podrian mostrar data incompleta.
 
 ## Archivo descargado no carga a staging por campo extenso
 

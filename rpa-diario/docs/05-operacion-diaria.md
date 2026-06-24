@@ -56,6 +56,8 @@ Variables del wrapper:
 
 Antes de cada relanzamiento por preflight, el wrapper limpia procesos `chromedriver` del usuario y perfiles temporales de preflight bajo `tmp_chrome` para reducir residuos del intento fallido.
 
+El wrapper tambien evita corridas redundantes muy cercanas: si detecta una corrida completa con `TOTAL_FAIL=0`, publicacion final OK, refresh OK y `RUN_END` dentro de los ultimos `RECENT_SUCCESS_SKIP_MINUTES` minutos, salta la nueva ejecucion con salida exitosa. Por defecto son `10` minutos.
+
 ## Revision ante falla
 
 1. Revisar log de corrida.
