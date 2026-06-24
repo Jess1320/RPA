@@ -97,6 +97,7 @@ Inestabilidad del entorno Chromium/ChromeDriver bajo ejecucion automatica, espec
 - Usar wrapper con `flock` para impedir solapamiento entre corrida automatica y manual.
 - Ejecutar preflight de ChromeDriver antes de limpiar archivos o descargar.
 - Si el preflight falla, no continuar con los 104 centros.
+- Registrar alerta y enviar correo aun cuando la corrida termine durante el preflight.
 
 ## Archivo descargado no carga a staging por campo extenso
 

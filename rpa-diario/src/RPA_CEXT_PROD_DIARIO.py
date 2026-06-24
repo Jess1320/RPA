@@ -3163,6 +3163,8 @@ def main():
         failure_detail = "ChromeDriver no pudo iniciar antes de limpiar o descargar."
         end_dt = datetime.datetime.now()
         dur = (end_dt - start_dt).total_seconds()
+        failed_centros_preflight = [x.get("centro", "") for x in centros_meta if x.get("centro")]
+        final_status = "FAILED"
 
         if db and run_db_id:
             try:
@@ -3176,12 +3178,87 @@ def main():
                     duration_seconds=dur,
                     observacion=failure_detail
                 )
+                db.create_alert_event(
+                    id_run=run_db_id,
+                    channel="EMAIL",
+                    alert_type="CHROMEDRIVER_PREFLIGHT_FAIL",
+                    severity="HIGH",
+                    title="RPA Diario falló antes de descargar",
+                    message=failure_detail,
+                    payload={
+                        "final_status": final_status,
+                        "failure_stage": failure_stage,
+                        "failure_detail": failure_detail,
+                        "total_input": len(centros_meta),
+                        "total_ok": 0,
+                        "total_fail": len(centros_meta),
+                        "duration_seconds": dur,
+                    }
+                )
             except Exception as e:
                 print(f"DB_FINISH_WARN | {type(e).__name__}: {e}", flush=True)
 
         summary(summary_path, "RUN_END")
         summary(summary_path, f"Fecha fin    | {end_dt.strftime('%Y-%m-%d %H:%M:%S')}")
         summary(summary_path, f"Duración(s)  | {dur:.1f}")
+
+        mail_enabled = bool(cfg.get("MAIL_ENABLED", False))
+        smtp_to = cfg.get("SMTP_TO", [])
+        if isinstance(smtp_to, str):
+            smtp_to = [x.strip() for x in smtp_to.split(",") if x.strip()]
+        smtp_cc = [x.strip() for x in os.getenv("SMTP_CC", "").split(",") if x.strip()]
+
+        if mail_enabled and smtp_to:
+            try:
+                try:
+                    run_log_f.flush()
+                except Exception:
+                    pass
+
+                mail_subject = (
+                    f"[RPA DIARIO] {final_status} | {fecha_operativa_mail or 'SIN_FECHA'} | "
+                    f"OK:0 FAIL:{len(centros_meta)}"
+                )
+                mail_body = build_run_email_body_diario(
+                    run_uuid=run_id,
+                    final_status=final_status,
+                    fecha_operativa=fecha_operativa_mail,
+                    fecha_futuro_fin=fecha_futuro_fin_mail,
+                    start_dt=start_dt,
+                    end_dt=end_dt,
+                    dur=dur,
+                    total_input=len(centros_meta),
+                    total_ok=0,
+                    total_fail=len(centros_meta),
+                    failed_centros=failed_centros_preflight,
+                    resultados_todos=[],
+                    final_publish_ok=False,
+                    refresh_diario_ok=False,
+                    report_pendientes_ok=False,
+                    report_futuro_ok=False,
+                    failure_stage=failure_stage,
+                    failure_detail=failure_detail,
+                    attachment_label=os.path.basename(run_log_path) if run_log_path else "SIN_LOG",
+                )
+
+                send_smtp_mail(
+                    smtp_host=cfg.get("SMTP_HOST", ""),
+                    smtp_port=int(cfg.get("SMTP_PORT", 587) or 587),
+                    smtp_user=cfg.get("SMTP_USER", ""),
+                    smtp_pass=cfg.get("SMTP_PASS", ""),
+                    mail_from=cfg.get("SMTP_FROM", ""),
+                    mail_to=smtp_to,
+                    mail_cc=smtp_cc,
+                    subject=mail_subject,
+                    body_text=mail_body,
+                    attachment_path=run_log_path if run_log_path and os.path.exists(run_log_path) else "",
+                )
+                print("MAIL_SEND_OK | CHROMEDRIVER_PREFLIGHT_FAIL", flush=True)
+            except Exception as e:
+                print(f"MAIL_SEND_WARN | CHROMEDRIVER_PREFLIGHT_FAIL | {type(e).__name__}: {e}", flush=True)
+        else:
+            print("MAIL_SEND_SKIP | CHROMEDRIVER_PREFLIGHT_FAIL | MAIL_DISABLED_OR_NO_RECIPIENTS", flush=True)
+
         try:
             run_log_f.close()
         except Exception:

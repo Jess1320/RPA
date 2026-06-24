@@ -43,6 +43,8 @@ En una corrida con descargas y publicacion correctas debe aparecer en `summary.l
 
 Antes de limpiar archivos o iniciar descargas, la version controlada ejecuta un preflight de ChromeDriver. Si falla, se registra `CHROMEDRIVER_PREFLIGHT_FAIL` y la corrida termina sin borrar los archivos del TAG.
 
+Si el preflight de ChromeDriver falla, la corrida debe quedar como `FAILED`, registrar alerta `CHROMEDRIVER_PREFLIGHT_FAIL` y enviar correo con el log adjunto. Si no llega correo, revisar `MAIL_SEND_WARN` o `MAIL_SEND_SKIP` en `run.log`.
+
 ## Revision ante falla
 
 1. Revisar log de corrida.
