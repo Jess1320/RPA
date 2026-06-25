@@ -77,3 +77,22 @@ Para incidentes de ChromeDriver revisar tambien:
 - Conteo de procesos `chromedriver` y `chromium-browser`.
 - Variable `MAX_CONCURRENT_DRIVER_STARTS`; en produccion se recomienda `1`.
 - Variable `MAX_THREADS`; si hay inestabilidad de Chromium/ChromeDriver bajo systemd, bajar temporalmente de `6` a `3` reduce navegadores simultaneos con impacto moderado en tiempo de ejecucion.
+
+## Ajuste systemd para Chromium snap
+
+En produccion, Chromium/ChromeDriver esta instalado como snap. Para que el timer de systemd no dependa de una sesion SSH temporal del usuario, se dejo habilitado `linger` para `cenate` y un drop-in del servicio:
+
+```ini
+# /etc/systemd/system/rpa-cext-diario.service.d/10-snap-runtime.conf
+[Service]
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+```
+
+Comandos de validacion:
+
+```bash
+loginctl show-user cenate -p RuntimePath -p Linger -p State
+systemctl cat rpa-cext-diario.service
+systemctl show rpa-cext-diario.service -p Environment --no-pager
+```

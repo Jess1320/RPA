@@ -100,7 +100,9 @@ Inestabilidad del entorno Chromium/ChromeDriver bajo ejecucion automatica, espec
 - Relanzar automaticamente desde el wrapper si el script termina con codigo `4`, reservado para `CHROMEDRIVER_PREFLIGHT_FAIL`.
 - Limpiar procesos/perfiles temporales de Chrome del propio RPA antes de cada relanzamiento por preflight.
 - Enviar correo solo cuando se agota el ultimo intento del wrapper; los intentos intermedios quedan en log/BD para no saturar alertas.
-- Si la falla aparece bajo systemd y el journal muestra `snap.chromium.chromedriver`, `apparmor="DENIED"` o errores dbus, tratarlo como inestabilidad del paquete snap. Bajar `MAX_THREADS` ayuda a reducir presion, pero la solucion estructural es migrar a un Chrome/ChromeDriver no snap y dejar las rutas configurables.
+- Si la falla aparece bajo systemd y el journal muestra `snap.chromium.chromedriver`, `apparmor="DENIED"` o errores dbus, tratarlo como inestabilidad del paquete snap.
+- Validar que el servicio tenga el drop-in `10-snap-runtime.conf` con `XDG_RUNTIME_DIR` y `DBUS_SESSION_BUS_ADDRESS`, y que `loginctl show-user cenate` muestre `Linger=yes`.
+- Bajar `MAX_THREADS` ayuda a reducir presion. Si el problema vuelve despues del ajuste de runtime, la solucion estructural es migrar a un Chrome/ChromeDriver no snap y dejar las rutas configurables.
 - Evitar corridas automaticas redundantes si acaba de terminar una corrida completa exitosa, para dar enfriamiento al entorno Chromium/ChromeDriver.
 - Si el preflight falla, no continuar con los 104 centros.
 - Registrar alerta y enviar correo aun cuando la corrida termine durante el preflight.
