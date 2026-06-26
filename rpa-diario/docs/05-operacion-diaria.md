@@ -76,7 +76,20 @@ Para incidentes de ChromeDriver revisar tambien:
 - `tmp_chrome/chromedriver_logs/`
 - Conteo de procesos `chromedriver` y `chromium-browser`.
 - Variable `MAX_CONCURRENT_DRIVER_STARTS`; en produccion se recomienda `1`.
-- Variable `MAX_THREADS`; si hay inestabilidad de Chromium/ChromeDriver bajo systemd, bajar temporalmente de `6` a `3` reduce navegadores simultaneos con impacto moderado en tiempo de ejecucion.
+- Variable `MAX_THREADS`; el perfil operativo actual es `4`. Si hay inestabilidad de Chromium/ChromeDriver bajo systemd, bajar temporalmente a `3` reduce navegadores simultaneos con impacto moderado en tiempo de ejecucion.
+
+## Rango especial temporal
+
+El viernes normalmente usa `SPECIAL_END_OFFSET_DAYS=3`, que cubre viernes, sabado, domingo y lunes. Si por operacion se necesita incluir martes solo por un dia, usar `SPECIAL_END_OFFSET_DAYS=4`.
+
+Para dejarlo temporal y revertir automatico al dia siguiente:
+
+```bash
+cd /home/cenate/rpa_cext_diario
+cp .env ".env.bak_$(date +%Y%m%d_%H%M%S)_range5"
+sed -i 's/^SPECIAL_END_OFFSET_DAYS=.*/SPECIAL_END_OFFSET_DAYS=4/' .env
+sudo systemd-run --unit=rpa-cext-diario-revert-special-range-YYYYMMDD --on-calendar='YYYY-MM-DD 00:05:00' /bin/bash -lc 'cd /home/cenate/rpa_cext_diario && cp .env .env.bak_before_auto_revert_YYYYMMDD && sed -i "s/^SPECIAL_END_OFFSET_DAYS=.*/SPECIAL_END_OFFSET_DAYS=3/" .env'
+```
 
 ## Ajuste systemd para Chromium snap
 
