@@ -82,13 +82,15 @@ Para incidentes de ChromeDriver revisar tambien:
 
 El viernes normalmente usa `SPECIAL_END_OFFSET_DAYS=3`, que cubre viernes, sabado, domingo y lunes. Si por operacion se necesita incluir martes solo por un dia, usar `SPECIAL_END_OFFSET_DAYS=4`.
 
+Si la excepcion tambien debe aplicar al sabado, agregar sabado a `SPECIAL_RANGE_WEEKDAYS` usando `4,5`. En Python `weekday()`, viernes es `4` y sabado es `5`. Luego programar la reversa para volver a `SPECIAL_RANGE_WEEKDAYS=4` y `SPECIAL_END_OFFSET_DAYS=3`.
+
 Para dejarlo temporal y revertir automatico al dia siguiente:
 
 ```bash
 cd /home/cenate/rpa_cext_diario
 cp .env ".env.bak_$(date +%Y%m%d_%H%M%S)_range5"
 sed -i 's/^SPECIAL_END_OFFSET_DAYS=.*/SPECIAL_END_OFFSET_DAYS=4/' .env
-sudo systemd-run --unit=rpa-cext-diario-revert-special-range-YYYYMMDD --on-calendar='YYYY-MM-DD 00:05:00' /bin/bash -lc 'cd /home/cenate/rpa_cext_diario && cp .env .env.bak_before_auto_revert_YYYYMMDD && sed -i "s/^SPECIAL_END_OFFSET_DAYS=.*/SPECIAL_END_OFFSET_DAYS=3/" .env'
+sudo systemd-run --unit=rpa-cext-diario-revert-special-range-YYYYMMDD --on-calendar='YYYY-MM-DD 00:05:00' /bin/bash -lc 'cd /home/cenate/rpa_cext_diario && cp .env .env.bak_before_auto_revert_YYYYMMDD && sed -i "s/^SPECIAL_RANGE_WEEKDAYS=.*/SPECIAL_RANGE_WEEKDAYS=4/" .env && sed -i "s/^SPECIAL_END_OFFSET_DAYS=.*/SPECIAL_END_OFFSET_DAYS=3/" .env'
 ```
 
 ## Ajuste systemd para Chromium snap
