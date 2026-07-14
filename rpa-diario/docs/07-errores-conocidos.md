@@ -160,3 +160,28 @@ El archivo de ExplotaDatos es un texto delimitado plano por `|`. Si Python lo le
 
 - Leer los TXT de ExplotaDatos con `quoting=csv.QUOTE_NONE`.
 - Reprocesar o esperar una nueva corrida para que staging y las vistas reflejen todas las filas.
+
+## Filas rechazadas por estructura de columnas
+
+**Sintoma:**
+
+- Algunos registros aparecen con columnas corridas al revisar la descarga cruda o una importacion manual.
+- El log muestra `ROW_STRUCTURE_WARN`.
+- `raw.archivo_descargado.estado` puede quedar como `LOADED_TO_STG_WITH_ROW_WARNINGS` si hubo filas validas cargadas, o `ROW_STRUCTURE_REJECTED` si todas las filas del archivo fueron rechazadas.
+
+**Causa probable:**
+
+El archivo delimitado trae una fila con una cantidad de columnas distinta a la cabecera. Esto suele pasar por un delimitador `|` dentro de un dato, salto de linea embebido, tabulador o descarga incompleta.
+
+**Comportamiento esperado:**
+
+- Las filas cuya cantidad de columnas coincide exactamente con la cabecera se cargan sin modificar la estructura.
+- Las filas con columnas de mas o de menos no se rellenan ni se cortan automaticamente.
+- Los saltos de linea y tabuladores dentro de campos ya parseados se normalizan a espacio antes de cargar.
+- Se registra una alerta con conteo de filas rechazadas y muestras de hasta 10 filas para diagnostico.
+
+**Accion recomendada:**
+
+- Revisar las muestras del evento `ROW_STRUCTURE_WARN`.
+- Validar el TXT crudo del centro afectado antes de reprocesar.
+- No corregir por posicion en base de datos si la fila ya llego corrida; se debe corregir el archivo fuente o volver a descargarlo.

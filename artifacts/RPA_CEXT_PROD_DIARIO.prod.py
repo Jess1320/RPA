@@ -1192,7 +1192,15 @@ def _tail_text(path: str, max_chars: int = 1200) -> str:
         return ""
 
 
+def _chromedriver_logs_enabled() -> bool:
+    return (os.getenv("CHROMEDRIVER_LOGS_ENABLED", "false") or "false").strip().lower() in (
+        "1", "true", "yes", "y", "si", "sí"
+    )
+
+
 def _chromedriver_log_path(user: str, center_code: str, startup_attempt: int) -> str:
+    if not _chromedriver_logs_enabled():
+        return os.devnull
     log_dir = os.path.join(get_chrome_tmp_root(), "chromedriver_logs")
     os.makedirs(log_dir, exist_ok=True)
     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
@@ -2549,9 +2557,30 @@ def ejecutar_descargas_por_macro(
 # =========================
 # Config desde .env
 # =========================
-def load_config_from_env() -> dict:
+def load_rpa_env_files() -> None:
     env_file = os.getenv("ENV_FILE", ".env")
-    load_dotenv(env_file)
+    load_dotenv(env_file, override=False)
+
+    users_env = os.getenv("RPA_USERS_ENV_FILE", "").strip() or os.getenv("USERS_ENV_FILE", "").strip()
+    project_dir = Path(__file__).resolve().parents[1]
+    candidates = []
+    if users_env:
+        candidates.append(users_env)
+    candidates.extend([
+        str(project_dir / "config" / ".env_usuarios"),
+        str(project_dir.parent / "shared" / "config" / ".env_usuarios"),
+        ".env_usuarios",
+    ])
+
+    for candidate in candidates:
+        path = Path(candidate).expanduser()
+        if path.is_file():
+            load_dotenv(path, override=True)
+            break
+
+
+def load_config_from_env() -> dict:
+    load_rpa_env_files()
 
     # Legacy: se deja por compatibilidad, pero ya no es obligatorio
     usuarios: List[Tuple[int, str, str]] = []
@@ -2567,6 +2596,7 @@ def load_config_from_env() -> dict:
     DOWNLOAD_DIRS_ENV = _env_str("DOWNLOAD_DIRS", "")
     DOWNLOAD_DIR_LEGACY = _env_str("DOWNLOAD_DIR", "")
     FINAL_PUBLISH_DIR = _env_str("FINAL_PUBLISH_DIR", "")
+    ENABLE_FINAL_PUBLISH = _env_bool("ENABLE_FINAL_PUBLISH", "true")
 
     GSHEET_URL = _env_str("GSHEET_URL")
     CREDS_JSON = _env_str("CREDS_JSON")
@@ -2674,6 +2704,8 @@ def load_config_from_env() -> dict:
 
     for d in DOWNLOAD_DIR_LIST:
         os.makedirs(d, exist_ok=True)
+
+    if ENABLE_FINAL_PUBLISH:
         os.makedirs(FINAL_PUBLISH_DIR, exist_ok=True)
 
     os.makedirs(CHROME_TMP_ROOT, exist_ok=True)
@@ -2684,7 +2716,6 @@ def load_config_from_env() -> dict:
         ("FRM_MASIVAS", URL_MASIVAS),
         ("GSHEET_URL", GSHEET_URL),
         ("CREDS_JSON", CREDS_JSON),
-    ("FINAL_PUBLISH_DIR", FINAL_PUBLISH_DIR),
         ("PG_HOST", PG_HOST),
         ("PG_DATABASE", PG_DATABASE),
         ("PG_USER", PG_USER),
@@ -2696,6 +2727,9 @@ def load_config_from_env() -> dict:
     ]:
         if not v:
             faltan.append(k)
+
+    if ENABLE_FINAL_PUBLISH and not FINAL_PUBLISH_DIR:
+        faltan.append("FINAL_PUBLISH_DIR")
 
     if len(GSHEET_TABS) == 0:
         faltan.append("GSHEET_TABS o GSHEET_TAB (con 2 tabs separadas por coma)")
@@ -2728,6 +2762,7 @@ def load_config_from_env() -> dict:
         "GSHEET_URL": GSHEET_URL,
         "CREDS_JSON": CREDS_JSON,
         "FINAL_PUBLISH_DIR": FINAL_PUBLISH_DIR,
+        "ENABLE_FINAL_PUBLISH": bool(ENABLE_FINAL_PUBLISH),
         "GSHEET_TABS": GSHEET_TABS,
 
         "DOWNLOAD_TIMEOUT": int(DOWNLOAD_TIMEOUT),
@@ -2915,9 +2950,6 @@ def derive_final_status(
     if overall_exit == 130:
         return "CANCELLED"
 
-    if overall_exit != 0:
-        return "FAILED"
-
     if total_ok == 0 and total_fail > 0:
         return "FAILED"
 
@@ -2925,12 +2957,16 @@ def derive_final_status(
         return "FAILED"
 
     if total_ok > 0 and (
-        total_fail > 0
+        overall_exit != 0
+        or total_fail > 0
         or not refresh_diario_ok
         or not report_pendientes_ok
         or not report_futuro_ok
     ):
         return "PARTIAL_SUCCESS"
+
+    if overall_exit != 0:
+        return "FAILED"
 
     return "SUCCESS"
 
@@ -3015,6 +3051,7 @@ def main():
     DOWNLOAD_DIR_PRIMARY = cfg["DOWNLOAD_DIR_PRIMARY"]
     DOWNLOAD_DIR_MIRRORS = cfg["DOWNLOAD_DIR_MIRRORS"]
     FINAL_PUBLISH_DIR = cfg["FINAL_PUBLISH_DIR"]
+    ENABLE_FINAL_PUBLISH = cfg["ENABLE_FINAL_PUBLISH"]
     GSHEET_URL = cfg["GSHEET_URL"]
     CREDS_JSON = cfg["CREDS_JSON"]
     DOWNLOAD_TIMEOUT = cfg["DOWNLOAD_TIMEOUT"]
@@ -3229,7 +3266,8 @@ def main():
     print(f"TAG           : {TAG}", flush=True)
     print(f"FILE_SUFFIX   : {FILE_SUFFIX}", flush=True)
     print(f"Rutas descarga: {DOWNLOAD_DIR_LIST}", flush=True)
-    print(f"Ruta publish  : {FINAL_PUBLISH_DIR}", flush=True)
+    print(f"Publish final : {'SI' if ENABLE_FINAL_PUBLISH else 'NO'}", flush=True)
+    print(f"Ruta publish  : {FINAL_PUBLISH_DIR if ENABLE_FINAL_PUBLISH else 'DESHABILITADA (solo BD/reportes)'}", flush=True)
     print(f"MACRO_USERS   : { {k: v[0] for k, v in MACRO_USERS.items()} }", flush=True)
     print(f"INPUT | Centros (checks merge) ({len(centros_meta)}): {centros_meta}", flush=True)
     print("==================================\n", flush=True)
@@ -3404,7 +3442,7 @@ def main():
                             file_path=item.get("archivo_path", ""),
                             file_size_bytes=int(item.get("archivo_size", 0)),
                             estado="DOWNLOADED",
-                            publicado_txt=True,
+                            publicado_txt=bool(ENABLE_FINAL_PUBLISH),
                             cargado_stg=False
                         )
 
@@ -3462,28 +3500,40 @@ def main():
         else:
             summary(summary_path, "KEEP_ONLY_TAG_SKIP | no OK downloads (no se borran históricos)")
 
-        # Publicación final al compartido si hubo al menos 1 archivo OK
+        # Publicacion final opcional. La carga a BD/reportes no depende de guardar TXT finales.
         final_publish_ok = False
         if len(descargados_total_ordenado) > 0:
-            final_publish_ok = publish_txts_to_final_dir(
-                temp_dir=DOWNLOAD_DIR_PRIMARY,
-                final_dir=FINAL_PUBLISH_DIR,
-                tag=TAG,
-                file_suffix=FILE_SUFFIX,
-                summary_path=summary_path,
-                db=db,
-                run_db_id=run_db_id
-            )
+            if ENABLE_FINAL_PUBLISH:
+                final_publish_ok = publish_txts_to_final_dir(
+                    temp_dir=DOWNLOAD_DIR_PRIMARY,
+                    final_dir=FINAL_PUBLISH_DIR,
+                    tag=TAG,
+                    file_suffix=FILE_SUFFIX,
+                    summary_path=summary_path,
+                    db=db,
+                    run_db_id=run_db_id
+                )
 
-            if len(centros_pendientes_ordenado) > 0:
+                if len(centros_pendientes_ordenado) > 0:
+                    emit_event(
+                        summary_path,
+                        db,
+                        run_db_id,
+                        "WARN",
+                        "FINAL_PUBLISH_PARTIAL",
+                        f"tag={TAG} | total_ok={len(descargados_total_ordenado)} | total_fail={len(centros_pendientes_ordenado)} | fail_centros={centros_pendientes_ordenado}"
+                    )
+            else:
+                final_publish_ok = True
                 emit_event(
                     summary_path,
                     db,
                     run_db_id,
-                    "WARN",
-                    "FINAL_PUBLISH_PARTIAL",
-                    f"tag={TAG} | total_ok={len(descargados_total_ordenado)} | total_fail={len(centros_pendientes_ordenado)} | fail_centros={centros_pendientes_ordenado}"
+                    "INFO",
+                    "FINAL_PUBLISH_DISABLED",
+                    f"tag={TAG} | total_ok={len(descargados_total_ordenado)} | motivo=solo_bd_reportes"
                 )
+
         else:
             emit_event(
                 summary_path,
@@ -3693,7 +3743,7 @@ def main():
                 total_ok=len(descargados_total_ordenado),
                 total_fail=len(centros_pendientes_ordenado),
                 duration_seconds=dur,
-                observacion=f"HEADLESS={HEADLESS} | MAX_THREADS={MAX_THREADS} | FINAL_PUBLISH_DIR={FINAL_PUBLISH_DIR}"
+                    observacion=f"HEADLESS={HEADLESS} | MAX_THREADS={MAX_THREADS} | ENABLE_FINAL_PUBLISH={ENABLE_FINAL_PUBLISH} | FINAL_PUBLISH_DIR={FINAL_PUBLISH_DIR}"
             )
         except Exception as e:
             print(f"DB_FINISH_WARN | {type(e).__name__}: {e}", flush=True)
@@ -3798,6 +3848,9 @@ def main():
         run_log_f.close()
     except Exception:
         pass
+
+    if final_status == "PARTIAL_SUCCESS":
+        sys.exit(0)
 
     sys.exit(overall_exit)
 
