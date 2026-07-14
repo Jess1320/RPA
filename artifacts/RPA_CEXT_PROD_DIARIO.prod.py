@@ -487,6 +487,79 @@ def compact_row_sample(row: list, max_cols: int = 10, max_chars: int = 240) -> s
     return sample
 
 
+def normalize_row_width(row: list, expected_columns: int, delimiter: str) -> Tuple[list, Optional[Dict[str, object]]]:
+    actual_columns = len(row)
+    if actual_columns == expected_columns:
+        return row, None
+
+    issue = {
+        "expected_columns": expected_columns,
+        "actual_columns": actual_columns,
+        "action": "",
+        "sample": compact_row_sample(row)
+    }
+
+    if actual_columns < expected_columns:
+        issue["action"] = "PADDED_SHORT_ROW"
+        return row + [""] * (expected_columns - actual_columns), issue
+
+    issue["action"] = "MERGED_EXTRA_COLUMNS_IN_LAST_FIELD"
+    return row[:expected_columns - 1] + [delimiter.join(row[expected_columns - 1:])], issue
+
+
+def looks_like_phone(value: str) -> bool:
+    return bool(re.fullmatch(r"\d{9}", value or ""))
+
+
+def looks_like_code(value: str, width: int = 2) -> bool:
+    return bool(re.fullmatch(rf"\d{{{width}}}", value or ""))
+
+
+def looks_like_time(value: str) -> bool:
+    return bool(re.fullmatch(r"\d{1,2}:\d{2}", value or ""))
+
+
+def repair_shifted_phone_insurance_row(base: Dict[str, str]) -> Optional[Dict[str, object]]:
+    if not (
+        not base.get("tel_movil")
+        and looks_like_phone(base.get("cod_tipseguro") or "")
+        and looks_like_code(base.get("tipo_seguro") or "")
+        and (base.get("codtiparent") or "").strip()
+        and looks_like_code(base.get("tiparentesco") or "")
+        and looks_like_time(base.get("horafinal") or "")
+        and looks_like_time(base.get("codubigdomic") or "")
+    ):
+        return None
+
+    shifted_columns = [
+        "cod_tipseguro", "tipo_seguro", "codtiparent", "tiparentesco",
+        "codprecedencia", "descprecedencia", "cas_adscripcion", "nombadscripcion",
+        "n_r_c_ser", "n_r_c_est", "horainicio", "horafinal", "codubigdomic",
+        "ubigeodomic", "turno", "codtipprogramac", "tip_programacion",
+        "useregistro", "fecha_reg", "hora_reg", "usermodifica", "fecha_modifica",
+        "hora_modifica", "useranula", "fecha_anula", "hora_anula",
+        "orden_atencion", "codmotdeser", "motivo_desercion", "codmodotorcita",
+        "modalidadotorcita", "motivelimcita", "numreferorigen", "codconsultorio",
+        "desconsultorio", "ultcie10aten", "estado_programacion",
+        "motivo_suspension", "fechreferencia", "usuaregistro",
+        "estadreferencia", "observacion"
+    ]
+    old = {col: base.get(col) or "" for col in shifted_columns}
+    base["tel_movil"] = old["cod_tipseguro"]
+
+    for idx, col in enumerate(shifted_columns[:-1]):
+        base[col] = old[shifted_columns[idx + 1]]
+    base[shifted_columns[-1]] = ""
+
+    return {
+        "action": "REPAIRED_SHIFTED_PHONE_INSURANCE",
+        "doc_paciente": base.get("doc_paciente"),
+        "fecha_cita": base.get("fecha_cita"),
+        "hora_cita": base.get("hora_cita"),
+        "telefono_recuperado": base.get("tel_movil")
+    }
+
+
 def month_range_list(start_date: datetime.date, end_date: datetime.date) -> List[int]:
     months = []
     y, m = start_date.year, start_date.month
@@ -617,20 +690,20 @@ def procesar_txt_a_staging(
         rows_to_insert = []
         row_num = 0
         expected_row_columns = len(header_map)
-        rejected_row_samples = []
+        row_structure_warnings = []
+        semantic_repair_samples = []
+        structure_adjusted_count = 0
+        semantic_repaired_count = 0
 
         for row in reader:
             row_num += 1
 
-            if len(row) != expected_row_columns:
-                if len(rejected_row_samples) < 10:
-                    rejected_row_samples.append({
-                        "row_num": row_num,
-                        "expected_columns": expected_row_columns,
-                        "actual_columns": len(row),
-                        "sample": compact_row_sample(row)
-                    })
-                continue
+            row, structure_issue = normalize_row_width(row, expected_row_columns, delimiter)
+            if structure_issue:
+                structure_adjusted_count += 1
+                if len(row_structure_warnings) < 10:
+                    structure_issue["row_num"] = row_num
+                    row_structure_warnings.append(structure_issue)
 
             base = {c: None for c in STG_CEXT_COLUMNS}
             extra = {}
@@ -648,6 +721,14 @@ def procesar_txt_a_staging(
                     base[stg_col] = value
                 else:
                     extra[canonical] = value
+
+            semantic_repair = repair_shifted_phone_insurance_row(base)
+            if semantic_repair:
+                semantic_repaired_count += 1
+                semantic_repair["row_num"] = row_num
+                if len(semantic_repair_samples) < 10:
+                    semantic_repair_samples.append(semantic_repair)
+                extra["_repair_warnings"] = extra.get("_repair_warnings", []) + [semantic_repair["action"]]
 
             hash_payload = json.dumps(
                 {"base": base, "extra": extra},
@@ -674,42 +755,46 @@ def procesar_txt_a_staging(
                 row_hash
             ))
 
-        rejected_count = row_num - len(rows_to_insert)
-
         if rows_to_insert:
             db.bulk_insert_cext_prod_diario(rows_to_insert)
 
-        if rejected_count:
-            load_status = "LOADED_TO_STG_WITH_ROW_WARNINGS" if rows_to_insert else "ROW_STRUCTURE_REJECTED"
-            db.mark_file_loaded_to_staging(id_archivo, loaded=bool(rows_to_insert), estado=load_status)
+        warning_count = structure_adjusted_count + semantic_repaired_count
+        if warning_count:
+            load_status = "LOADED_TO_STG_WITH_ROW_WARNINGS"
+            db.mark_file_loaded_to_staging(id_archivo, loaded=True, estado=load_status)
 
             message = (
                 f"file={file_name} | status={load_status} | rows_inserted={len(rows_to_insert)} "
-                f"| rows_rejected={rejected_count} | expected_columns={expected_row_columns} "
-                f"| samples={rejected_row_samples}"
+                f"| structure_adjusted={structure_adjusted_count} "
+                f"| semantic_repaired={semantic_repaired_count} "
+                f"| expected_columns={expected_row_columns} "
+                f"| structure_samples={row_structure_warnings} "
+                f"| semantic_samples={semantic_repair_samples}"
             )
             emit_event(
                 summary_path,
                 db,
                 id_run,
                 "WARN",
-                "ROW_STRUCTURE_WARN",
+                "ROW_QUALITY_WARN",
                 message
             )
             db.create_alert_event(
                 id_run=id_run,
                 channel="EMAIL",
-                alert_type="ROW_STRUCTURE_WARN",
-                severity="MEDIUM" if rows_to_insert else "HIGH",
-                title=f"Filas rechazadas por estructura: {file_name}",
+                alert_type="ROW_QUALITY_WARN",
+                severity="MEDIUM",
+                title=f"Filas cargadas con reparacion/advertencia: {file_name}",
                 message=message,
                 payload={
                     "file_name": file_name,
                     "status": load_status,
                     "rows_inserted": len(rows_to_insert),
-                    "rows_rejected": rejected_count,
+                    "structure_adjusted": structure_adjusted_count,
+                    "semantic_repaired": semantic_repaired_count,
                     "expected_columns": expected_row_columns,
-                    "samples": rejected_row_samples
+                    "structure_samples": row_structure_warnings,
+                    "semantic_samples": semantic_repair_samples
                 }
             )
         else:
@@ -721,7 +806,7 @@ def procesar_txt_a_staging(
             id_run,
             "INFO",
             "STAGING_LOAD",
-            f"file={file_name} | rows={len(rows_to_insert)} | rows_rejected={rejected_count} | status={status}"
+            f"file={file_name} | rows={len(rows_to_insert)} | structure_adjusted={structure_adjusted_count} | semantic_repaired={semantic_repaired_count} | status={status}"
         )
 
 

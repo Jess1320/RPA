@@ -161,27 +161,29 @@ El archivo de ExplotaDatos es un texto delimitado plano por `|`. Si Python lo le
 - Leer los TXT de ExplotaDatos con `quoting=csv.QUOTE_NONE`.
 - Reprocesar o esperar una nueva corrida para que staging y las vistas reflejen todas las filas.
 
-## Filas rechazadas por estructura de columnas
+## Filas cargadas con reparacion por estructura o corrimiento
 
 **Sintoma:**
 
 - Algunos registros aparecen con columnas corridas al revisar la descarga cruda o una importacion manual.
-- El log muestra `ROW_STRUCTURE_WARN`.
-- `raw.archivo_descargado.estado` puede quedar como `LOADED_TO_STG_WITH_ROW_WARNINGS` si hubo filas validas cargadas, o `ROW_STRUCTURE_REJECTED` si todas las filas del archivo fueron rechazadas.
+- El log muestra `ROW_QUALITY_WARN`.
+- `raw.archivo_descargado.estado` puede quedar como `LOADED_TO_STG_WITH_ROW_WARNINGS`.
 
 **Causa probable:**
 
-El archivo delimitado trae una fila con una cantidad de columnas distinta a la cabecera. Esto suele pasar por un delimitador `|` dentro de un dato, salto de linea embebido, tabulador o descarga incompleta.
+El archivo delimitado trae una fila con una cantidad de columnas distinta a la cabecera, o una fila con la cantidad correcta de columnas pero con valores semanticamente corridos. Esto suele pasar por un delimitador `|` dentro de un dato, salto de linea embebido, tabulador, descarga incompleta o campos telefonicos/seguros desplazados.
 
 **Comportamiento esperado:**
 
 - Las filas cuya cantidad de columnas coincide exactamente con la cabecera se cargan sin modificar la estructura.
-- Las filas con columnas de mas o de menos no se rellenan ni se cortan automaticamente.
+- Las filas con columnas de menos se completan con vacios para no perder la cita.
+- Las filas con columnas de mas conservan la fila y agrupan el excedente al ultimo campo disponible.
 - Los saltos de linea y tabuladores dentro de campos ya parseados se normalizan a espacio antes de cargar.
-- Se registra una alerta con conteo de filas rechazadas y muestras de hasta 10 filas para diagnostico.
+- Si `cod_tipseguro` trae un telefono de 9 digitos y los campos siguientes tienen el patron `seguro -> parentesco -> rango horario` desplazado, el RPA repara el corrimiento conocido antes de insertar.
+- Se registra una alerta con conteo de filas normalizadas/reparadas y muestras de hasta 10 filas para diagnostico.
 
 **Accion recomendada:**
 
-- Revisar las muestras del evento `ROW_STRUCTURE_WARN`.
+- Revisar las muestras del evento `ROW_QUALITY_WARN`.
 - Validar el TXT crudo del centro afectado antes de reprocesar.
-- No corregir por posicion en base de datos si la fila ya llego corrida; se debe corregir el archivo fuente o volver a descargarlo.
+- No eliminar citas por problemas de estructura. Si aparece un nuevo patron de corrimiento, agregar una regla de reparacion semantica y reprocesar o corregir la corrida afectada.
