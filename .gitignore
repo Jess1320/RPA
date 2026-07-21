@@ -9,12 +9,18 @@ venv/
 
 # Secrets
 .env
+.env.*
+.env_usuarios
+**/.env_usuarios
 *.env
 !.env.example
+!**/.env.example
 config/*.json
 !config/*.example.json
 **/config/*.json
 !**/config/*.example.json
+secrets/
+**/secrets/
 
 # Logs and runtime artifacts
 logs/

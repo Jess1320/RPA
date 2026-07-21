@@ -18,7 +18,7 @@ rpa-cext-mensual.timer
 3. `MONTH_CONTEXT`
 4. `DB_PRECHECK`
 5. `CONTROL_DB_INIT`
-6. `GSHEET_READ`
+6. `INPUT_READ`
 7. `OVERRIDE_CACHE`
 8. `USER_HEALTH`
 9. `DOWNLOAD`
@@ -33,6 +33,56 @@ rpa-cext-mensual.timer
 18. `MAIL_NOTIFICATION`
 
 ## Seleccion de centros/IPRESS
+
+### Fuente DB View
+
+La fuente objetivo para produccion es la vista:
+
+```sql
+SELECT *
+FROM essi.vw_rpa_mensual_centros_objetivo_v1
+WHERE activo = true
+ORDER BY desc_macro, desc_red, codigo_centro;
+```
+
+Esta vista vive en `maestro_cenate` y entrega los centros/IPRESS descubiertos desde el WebService de Programacion ESSI del mes vigente.
+La vista ya viene filtrada para el alcance funcional del RPA Mensual CEXT: Consulta Externa y Areas Administrativas.
+No se deben agregar filtros ni descargas de Ayuda al Diagnostico ni Urgencia/Emergencia desde esta fuente, porque esos procesos pertenecen a otros RPAs.
+
+Columnas clave para el RPA:
+
+- `codigo_centro`: codigo IPRESS normalizado a 3 digitos.
+- `desc_macro`: macroregion asociada al centro.
+- `desc_red`: red asistencial asociada al centro.
+- `ipress`: nombre del centro/IPRESS.
+- `cod_ori_ipress`: origen IPRESS ESSI.
+- `total_programaciones`: cantidad de programaciones detectadas.
+- `total_profesionales`: profesionales CENATE con programacion en ese centro.
+- `programaciones_aprobadas`
+- `programaciones_bloqueadas`
+- `programaciones_suspendidas`
+- `estado_prioritario`
+- `ultima_actualizacion_ws`
+
+La relacion de red y macroregion se hace contra `public.vw_macro_red_ipress` usando:
+
+```sql
+lpad(btrim(public.vw_macro_red_ipress.cod_ipress::text), 3, '0') = codigo_centro
+```
+
+Al usar `INPUT_SOURCE=DB_VIEW`, el RPA transforma cada fila activa al contrato interno:
+
+```python
+{"centro": codigo_centro, "macro": desc_macro}
+```
+
+Desde ese punto se conserva la logica ya validada: agrupacion por macroregion, usuarios maestros, fallback, descarga, staging, publicacion, refresh y correo.
+
+La vista incluye programaciones `APROBADAS`, `BLOQUEADAS` y `SUSPENDIDAS`. No consulta citas, no llena `stg_citas_preconfirmadas` y no modifica `dim_solicitud_bolsa`.
+
+El worker que alimenta la vista se actualiza todos los dias a la 01:00 AM. El RPA Mensual corre a la 01:30 AM, dejando 30 minutos de margen. En prueba productiva la vista respondio aproximadamente en 10 segundos para todo el mes.
+
+### Fuente Google Sheets historica
 
 El RPA lee `GSHEET_TABS` desde `.env_mensual`. En produccion se observaron las tabs:
 

@@ -20,6 +20,7 @@ El RPA Mensual es una variante del RPA Diario para el reporte `PacCitCExt`, pero
 - No ejecutar el RPA mensual sin autorizacion explicita.
 - No copiar `.env_mensual` real al repositorio.
 - No exponer credenciales, URLs privadas ni JSON de Google en documentacion publica.
+- No repetir credenciales en cada proyecto; usar `RPA_USERS_ENV_FILE` o `shared/config/.env_usuarios`.
 - Si se revisan logs, resumir metricas y eventos; no versionar logs.
 
 ## Flujo funcional

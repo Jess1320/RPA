@@ -1,0 +1,10 @@
+[Unit]
+Description=Timer RPA Tele Proad
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+Persistent=false
+Unit=rpa-tele-proad.service
+
+[Install]
+WantedBy=timers.target

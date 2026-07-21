@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>pe.gob.essalud.rpa-medico-no-medico</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/cenate2/rpas/rpa-medico-no-medico/scripts/run_rpa_medico_no_medico.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/cenate2/rpas/rpa-medico-no-medico</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>ENV_FILE</key>
+    <string>.env.qa</string>
+    <key>RPA_USERS_ENV_FILE</key>
+    <string>/Users/cenate2/rpas/shared/config/.env_usuarios</string>
+    <key>TZ</key>
+    <string>America/Lima</string>
+  </dict>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>2</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/Users/cenate2/rpas/rpa-medico-no-medico/orchestrator_logs/launchd.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/cenate2/rpas/rpa-medico-no-medico/orchestrator_logs/launchd.err.log</string>
+</dict>
+</plist>

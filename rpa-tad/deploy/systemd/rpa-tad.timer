@@ -1,0 +1,10 @@
+[Unit]
+Description=Timer RPA Tele Apoyo al Diagnostico
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+Persistent=false
+Unit=rpa-tad.service
+
+[Install]
+WantedBy=timers.target

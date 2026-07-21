@@ -24,12 +24,13 @@ DOWNLOAD_TIMEOUT_SECONDS=Timeout de descarga
 
 ## Credenciales compartidas
 
-Como todos los RPAs usan el mismo proceso base de login, se recomienda no repetir credenciales en cada proyecto sin control. Opciones:
+Como todos los RPAs usan el mismo proceso base de login, las credenciales de descarga deben centralizarse:
 
-- Archivo `.env` por entorno, fuera de Git.
-- Variables de entorno del servidor.
-- Secret manager.
-- Archivo comun local no versionado para credenciales de ExplotaDatos.
+- Archivo privado recomendado: `shared/config/.env_usuarios`.
+- Ruta alternativa por entorno: `RPA_USERS_ENV_FILE`.
+- Variables esperadas: `USER_CENTRO`, `PASSWORD_CENTRO`, `USER_NORTE`, `PASSWORD_NORTE`, `USER_SUR`, `PASSWORD_SUR`, `USER_LIMA_ORIENTE`, `PASSWORD_LIMA_ORIENTE`.
+
+El `.env` del RPA debe conservar rutas, Google Sheets, correo, base de control y parametros propios del job. Si el `.env` existente aun contiene credenciales por macro, el RPA sigue siendo compatible, pero el archivo maestro tiene prioridad cuando existe.
 
 ## Configuracion por RPA
 
@@ -43,4 +44,3 @@ Cada RPA debe documentar:
 - Nombre esperado de archivo.
 - Tablas destino.
 - Indicadores de exito.
-

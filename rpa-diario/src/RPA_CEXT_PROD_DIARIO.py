@@ -1277,7 +1277,15 @@ def _tail_text(path: str, max_chars: int = 1200) -> str:
         return ""
 
 
+def _chromedriver_logs_enabled() -> bool:
+    return (os.getenv("CHROMEDRIVER_LOGS_ENABLED", "false") or "false").strip().lower() in (
+        "1", "true", "yes", "y", "si", "sí"
+    )
+
+
 def _chromedriver_log_path(user: str, center_code: str, startup_attempt: int) -> str:
+    if not _chromedriver_logs_enabled():
+        return os.devnull
     log_dir = os.path.join(get_chrome_tmp_root(), "chromedriver_logs")
     os.makedirs(log_dir, exist_ok=True)
     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
@@ -2634,9 +2642,30 @@ def ejecutar_descargas_por_macro(
 # =========================
 # Config desde .env
 # =========================
-def load_config_from_env() -> dict:
+def load_rpa_env_files() -> None:
     env_file = os.getenv("ENV_FILE", ".env")
-    load_dotenv(env_file)
+    load_dotenv(env_file, override=False)
+
+    users_env = os.getenv("RPA_USERS_ENV_FILE", "").strip() or os.getenv("USERS_ENV_FILE", "").strip()
+    project_dir = Path(__file__).resolve().parents[1]
+    candidates = []
+    if users_env:
+        candidates.append(users_env)
+    candidates.extend([
+        str(project_dir / "config" / ".env_usuarios"),
+        str(project_dir.parent / "shared" / "config" / ".env_usuarios"),
+        ".env_usuarios",
+    ])
+
+    for candidate in candidates:
+        path = Path(candidate).expanduser()
+        if path.is_file():
+            load_dotenv(path, override=True)
+            break
+
+
+def load_config_from_env() -> dict:
+    load_rpa_env_files()
 
     # Legacy: se deja por compatibilidad, pero ya no es obligatorio
     usuarios: List[Tuple[int, str, str]] = []
@@ -3000,9 +3029,6 @@ def derive_final_status(
     if overall_exit == 130:
         return "CANCELLED"
 
-    if overall_exit != 0:
-        return "FAILED"
-
     if total_ok == 0 and total_fail > 0:
         return "FAILED"
 
@@ -3010,12 +3036,16 @@ def derive_final_status(
         return "FAILED"
 
     if total_ok > 0 and (
-        total_fail > 0
+        overall_exit != 0
+        or total_fail > 0
         or not refresh_diario_ok
         or not report_pendientes_ok
         or not report_futuro_ok
     ):
         return "PARTIAL_SUCCESS"
+
+    if overall_exit != 0:
+        return "FAILED"
 
     return "SUCCESS"
 
@@ -3883,6 +3913,9 @@ def main():
         run_log_f.close()
     except Exception:
         pass
+
+    if final_status == "PARTIAL_SUCCESS":
+        sys.exit(0)
 
     sys.exit(overall_exit)
 

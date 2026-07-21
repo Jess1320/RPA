@@ -1,0 +1,20 @@
+[Unit]
+Description=Orquestador RPAs Cronicos
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=cenate
+Group=cenate
+WorkingDirectory=/home/cenate/rpa_orquestador_cronicos
+Environment=HOME=/home/cenate
+Environment=PATH=/home/cenate/rpa_cext_diario/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=ENV_FILE=.env
+ExecStart=/home/cenate/rpa_orquestador_cronicos/scripts/run_orquestador_cronicos.sh
+Nice=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

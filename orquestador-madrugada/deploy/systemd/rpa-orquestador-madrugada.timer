@@ -1,0 +1,10 @@
+[Unit]
+Description=Timer orquestador nocturno RPAs madrugada
+
+[Timer]
+OnCalendar=*-*-* 01:00:00
+Persistent=false
+Unit=rpa-orquestador-madrugada.service
+
+[Install]
+WantedBy=timers.target

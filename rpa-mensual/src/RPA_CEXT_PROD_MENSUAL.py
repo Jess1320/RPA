@@ -18,6 +18,7 @@ import datetime
 from calendar import monthrange
 import subprocess
 import psycopg2
+from psycopg2 import sql
 from psycopg2.extras import RealDictCursor
 import threading
 import signal
@@ -1062,6 +1063,102 @@ def get_centros_merged_from_tabs_checked_with_macro(
 
 
 
+def _split_qualified_name(name: str) -> Tuple[str, str]:
+    parts = [p.strip() for p in (name or "").split(".") if p.strip()]
+    if len(parts) != 2:
+        raise RuntimeError(f"DB_VIEW_NAME debe venir como esquema.vista: {name}")
+    for part in parts:
+        if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", part):
+            raise RuntimeError(f"DB_VIEW_NAME contiene identificador invalido: {name}")
+    return parts[0], parts[1]
+
+
+def get_centros_from_db_view(
+    *,
+    host: str,
+    port: int,
+    database: str,
+    user: str,
+    password: str,
+    view_name: str,
+    connect_timeout: int = 10,
+) -> Tuple[List[Dict[str, str]], Dict[str, int]]:
+    schema, view = _split_qualified_name(view_name)
+    query = sql.SQL("""
+        select
+            codigo_centro,
+            desc_macro,
+            desc_red,
+            ipress,
+            cod_ori_ipress,
+            total_programaciones,
+            total_profesionales,
+            programaciones_aprobadas,
+            programaciones_bloqueadas,
+            programaciones_suspendidas,
+            estado_prioritario,
+            ultima_actualizacion_ws
+        from {}.{}
+        where activo = true
+        order by desc_macro, desc_red, codigo_centro;
+    """).format(sql.Identifier(schema), sql.Identifier(view))
+
+    selected: List[Dict[str, str]] = []
+    seen = set()
+    dup = 0
+    empty = 0
+    invalid_macro = 0
+
+    with psycopg2.connect(
+        host=host,
+        port=int(port),
+        dbname=database,
+        user=user,
+        password=password,
+        connect_timeout=int(connect_timeout),
+    ) as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(query)
+            rows = cur.fetchall()
+
+    for row in rows:
+        raw_cod = str(row.get("codigo_centro") or "").strip()
+        if not raw_cod:
+            empty += 1
+            continue
+
+        centro = raw_cod.zfill(3) if raw_cod.isdigit() else raw_cod
+        canon = _canon_code(centro)
+        if canon in seen:
+            dup += 1
+            continue
+
+        macro = _norm_macro(str(row.get("desc_macro") or ""))
+        if macro not in VALID_MACROS:
+            invalid_macro += 1
+            macro = INVALID_MACRO_LABEL
+
+        seen.add(canon)
+        selected.append({
+            "centro": centro,
+            "macro": macro,
+            "source": "DB_VIEW",
+            "desc_red": str(row.get("desc_red") or ""),
+            "ipress": str(row.get("ipress") or ""),
+            "cod_ori_ipress": str(row.get("cod_ori_ipress") or ""),
+            "total_programaciones": str(row.get("total_programaciones") or 0),
+            "total_profesionales": str(row.get("total_profesionales") or 0),
+            "estado_prioritario": str(row.get("estado_prioritario") or ""),
+        })
+
+    return selected, {
+        "selected": len(selected),
+        "dup": dup,
+        "empty": empty,
+        "invalid_macro": invalid_macro,
+    }
+
+
 def _norm_cell(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "").strip().upper())
 
@@ -1341,7 +1438,15 @@ def _tail_text(path: str, max_chars: int = 1200) -> str:
         return ""
 
 
+def _chromedriver_logs_enabled() -> bool:
+    return (os.getenv("CHROMEDRIVER_LOGS_ENABLED", "false") or "false").strip().lower() in (
+        "1", "true", "yes", "y", "si", "sí"
+    )
+
+
 def _chromedriver_log_path(profile_base_dir: str, user: str, center_code: str, startup_attempt: int) -> str:
+    if not _chromedriver_logs_enabled():
+        return os.devnull
     log_dir = os.path.join(profile_base_dir, "chromedriver_logs")
     os.makedirs(log_dir, exist_ok=True)
     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
@@ -1646,6 +1751,7 @@ def publish_month_txts_to_final_dir(
     file_suffix: str,
     summary_path: str,
     expected_centers: Optional[List[str]] = None,
+    replace_period: bool = True,
     db=None,
     run_db_id: Optional[int] = None
 ) -> bool:
@@ -1723,10 +1829,17 @@ def publish_month_txts_to_final_dir(
             )
             return False
 
-        # limpiar SOLO el periodo del mes que se está regenerando
+        # En modo normal se reemplaza el periodo completo. En diagnostico se
+        # actualizan solo los centros descargados OK para no borrar historicos.
         removed = 0
+        replace_names = set(stage_files)
         for f in os.listdir(final_dir):
-            if _monthly_file_matches_period(f, period_first_ymd, period_last_ymd, file_suffix):
+            should_remove = (
+                _monthly_file_matches_period(f, period_first_ymd, period_last_ymd, file_suffix)
+                if replace_period
+                else f in replace_names
+            )
+            if should_remove:
                 try:
                     os.remove(os.path.join(final_dir, f))
                     removed += 1
@@ -1743,7 +1856,7 @@ def publish_month_txts_to_final_dir(
 
         emit_event(
             summary_path, db, run_db_id, "INFO", "FINAL_PUBLISH_RESULT",
-            f"period={period_first_ymd}_{period_last_ymd} | temp_files={len(files)} | removed={removed} | final_files={moved} | dir={final_dir}"
+            f"period={period_first_ymd}_{period_last_ymd} | temp_files={len(files)} | removed={removed} | final_files={moved} | replace_period={replace_period} | dir={final_dir}"
         )
 
         return True
@@ -1817,6 +1930,9 @@ def descargar_centro(
                 center_code=center_code,
                 profile_base_dir=PROFILE_BASE_DIR
             )
+            navigation_timeout = max(30, _env_int("SELENIUM_NAVIGATION_TIMEOUT", "90"))
+            driver.set_page_load_timeout(navigation_timeout)
+            driver.set_script_timeout(navigation_timeout)
 
             driver.get(URL_HOME)
             wait = WebDriverWait(driver, 20)
@@ -2188,6 +2304,9 @@ def ejecutar_descargas_por_macro(
     HEALTHCHECK_ENABLED: bool,
     HEALTHCHECK_BLOCKING: bool,
     override_map: Optional[Dict[str, Dict[str, str]]] = None,
+    overrides_enabled: bool = True,
+    fallback_enabled: bool = True,
+    override_learning_enabled: bool = True,
     db=None,
     run_uuid: str = "",
     run_db_id: Optional[int] = None
@@ -2199,6 +2318,14 @@ def ejecutar_descargas_por_macro(
     pendientes_primaria: List[Dict[str, str]] = []
 
     # Fase 0: overrides aprendidos
+    if not overrides_enabled:
+        override_map = {}
+        summary(summary_path, "OVERRIDE_DISABLED | se ignoran overrides aprendidos para esta corrida")
+    if not fallback_enabled:
+        summary(summary_path, "FALLBACK_DISABLED | no se intentaran macros alternativas")
+    if not override_learning_enabled:
+        summary(summary_path, "OVERRIDE_LEARNING_DISABLED | no se registraran aprendizajes nuevos")
+
     for item in centros_meta:
         centro = item["centro"]
         macro_decl = item["macro"]
@@ -2241,7 +2368,7 @@ def ejecutar_descargas_por_macro(
         if res["status"] == "OK":
             ok_final.add(centro)
             summary(summary_path, f"OVERRIDE_OK | centro={centro} | macro_decl={macro_decl} | macro_real={macro_real} | user={user}")
-            if db:
+            if db and override_learning_enabled:
                 try:
                     db.upsert_override(
                         codigo_centro=centro,
@@ -2391,6 +2518,26 @@ def ejecutar_descargas_por_macro(
         summary(summary_path, f"SIN_MACRO_QUEUE | total={len(centros_sin_macro)} | centros={centros_sin_macro}")
 
 
+    if not fallback_enabled:
+        fallback_disabled_pending = []
+        for item in pendientes_fallback:
+            centro = item["centro"]
+            if centro in ok_final:
+                continue
+            fallback_disabled_pending.append(centro)
+            resultados_todos.append({
+                "centro": centro,
+                "status": "FAIL",
+                "motivo": f"FALLBACK_DISABLED:{item.get('motivo_original', '')}",
+                "usuario": "",
+                "archivo": "",
+                "fase": "FALLBACK_DISABLED",
+                "macro_objetivo": item.get("macro_objetivo", ""),
+            })
+        if fallback_disabled_pending:
+            summary(summary_path, f"FALLBACK_DISABLED_PENDING | total={len(fallback_disabled_pending)} | centros={fallback_disabled_pending}")
+        pendientes_fallback = []
+
     # Segunda pasada: fallback controlado
     summary(summary_path, f"FALLBACK_START | total={len(pendientes_fallback)}")
 
@@ -2486,7 +2633,7 @@ def ejecutar_descargas_por_macro(
                     f"FALLBACK_OK | centro={centro} | macro_origen={macro_origen} | macro_real={alt_macro} | user={user}"
                 )
 
-                if db and allow_override_learn:
+                if db and allow_override_learn and override_learning_enabled:
                     try:
                         db.upsert_override(
                             codigo_centro=centro,
@@ -2527,9 +2674,30 @@ def ejecutar_descargas_por_macro(
 # =========================
 # Config desde .env
 # =========================
-def load_config_from_env() -> dict:
+def load_rpa_env_files() -> None:
     env_path = os.getenv("ENV_FILE", ".env")
     load_dotenv(env_path, override=False)
+
+    users_env = os.getenv("RPA_USERS_ENV_FILE", "").strip() or os.getenv("USERS_ENV_FILE", "").strip()
+    project_dir = Path(__file__).resolve().parents[1]
+    candidates = []
+    if users_env:
+        candidates.append(users_env)
+    candidates.extend([
+        str(project_dir / "config" / ".env_usuarios"),
+        str(project_dir.parent / "shared" / "config" / ".env_usuarios"),
+        ".env_usuarios",
+    ])
+
+    for candidate in candidates:
+        path = Path(candidate).expanduser()
+        if path.is_file():
+            load_dotenv(path, override=True)
+            break
+
+
+def load_config_from_env() -> dict:
+    load_rpa_env_files()
 
     # Legacy: se deja por compatibilidad, pero ya no es obligatorio
     usuarios: List[Tuple[int, str, str]] = []
@@ -2547,10 +2715,14 @@ def load_config_from_env() -> dict:
     FINAL_PUBLISH_DIR = _env_str("FINAL_PUBLISH_DIR", "")
     FINAL_PUBLISH_MIRRORS_RAW = _env_str("FINAL_PUBLISH_MIRRORS", "")
     FINAL_PUBLISH_MIRRORS = [x.strip() for x in FINAL_PUBLISH_MIRRORS_RAW.split(",") if x.strip()]
+    FINAL_PUBLISH_REPLACE_PERIOD = _env_bool("FINAL_PUBLISH_REPLACE_PERIOD", "true")
     MES_A_PROCESAR = _env_str("MES_A_PROCESAR", "ACTUAL")
 
     CLOSE_MONTH = _env_bool("CLOSE_MONTH", "false")
     CLOSE_MONTH_PERIOD = _env_str("CLOSE_MONTH_PERIOD", "")
+
+    INPUT_SOURCE = _norm_cell(_env_str("INPUT_SOURCE", "GSHEET"))
+    DB_VIEW_NAME = _env_str("DB_VIEW_NAME", "essi.vw_rpa_mensual_centros_objetivo_v1")
 
     GSHEET_URL = _env_str("GSHEET_URL")
     CREDS_JSON = _env_str("CREDS_JSON")
@@ -2562,6 +2734,11 @@ def load_config_from_env() -> dict:
     HEALTHCHECK_BLOCKING = _env_bool("HEALTHCHECK_BLOCKING", "true")
     DB_PRECHECK_ENABLED = _env_bool("DB_PRECHECK_ENABLED", "true")
     DB_CONNECT_TIMEOUT_SECONDS = _env_int("DB_CONNECT_TIMEOUT_SECONDS", "5")
+    OVERRIDES_ENABLED = _env_bool("OVERRIDES_ENABLED", "true")
+    FALLBACK_ENABLED = _env_bool("FALLBACK_ENABLED", "true")
+    OVERRIDE_LEARNING_ENABLED = _env_bool("OVERRIDE_LEARNING_ENABLED", "true")
+    STAGING_LOAD_ENABLED = _env_bool("STAGING_LOAD_ENABLED", "true")
+    REFRESH_MENSUAL_ENABLED = _env_bool("REFRESH_MENSUAL_ENABLED", "true")
     SMTP_HOST = _env_str("SMTP_HOST", "smtp.gmail.com")
     SMTP_PORT = _env_int("SMTP_PORT", "587")
     SMTP_USER = _env_str("SMTP_USER", "")
@@ -2618,6 +2795,12 @@ def load_config_from_env() -> dict:
     PG_USER = _env_str("PG_USER", "")
     PG_PASSWORD = _env_str("PG_PASSWORD", "")
 
+    INPUT_DB_HOST = _env_str("INPUT_DB_HOST", PG_HOST)
+    INPUT_DB_PORT = _env_int("INPUT_DB_PORT", str(PG_PORT))
+    INPUT_DB_DATABASE = _env_str("INPUT_DB_DATABASE", PG_DATABASE)
+    INPUT_DB_USER = _env_str("INPUT_DB_USER", PG_USER)
+    INPUT_DB_PASSWORD = _env_str("INPUT_DB_PASSWORD", PG_PASSWORD)
+
     SRC241_HOST = _env_str("SRC241_HOST", "")
     SRC241_PORT = _env_int("SRC241_PORT", "5432")
     SRC241_DATABASE = _env_str("SRC241_DATABASE", "")
@@ -2653,8 +2836,6 @@ def load_config_from_env() -> dict:
     for k, v in [
         ("URL_HOME", URL_HOME),
         ("FRM_MASIVAS", URL_MASIVAS),
-        ("GSHEET_URL", GSHEET_URL),
-        ("CREDS_JSON", CREDS_JSON),
         ("FINAL_PUBLISH_DIR", FINAL_PUBLISH_DIR),
         ("PG_HOST", PG_HOST),
         ("PG_DATABASE", PG_DATABASE),
@@ -2668,8 +2849,29 @@ def load_config_from_env() -> dict:
         if not v:
             faltan.append(k)
 
-    if len(GSHEET_TABS) == 0:
-        faltan.append("GSHEET_TABS o GSHEET_TAB (con 2 tabs separadas por coma)")
+    if INPUT_SOURCE not in ("GSHEET", "DB_VIEW"):
+        faltan.append("INPUT_SOURCE debe ser GSHEET o DB_VIEW")
+
+    if INPUT_SOURCE == "GSHEET":
+        for k, v in [
+            ("GSHEET_URL", GSHEET_URL),
+            ("CREDS_JSON", CREDS_JSON),
+        ]:
+            if not v:
+                faltan.append(k)
+        if len(GSHEET_TABS) == 0:
+            faltan.append("GSHEET_TABS o GSHEET_TAB (con tabs separadas por coma)")
+
+    if INPUT_SOURCE == "DB_VIEW":
+        for k, v in [
+            ("DB_VIEW_NAME", DB_VIEW_NAME),
+            ("INPUT_DB_HOST", INPUT_DB_HOST),
+            ("INPUT_DB_DATABASE", INPUT_DB_DATABASE),
+            ("INPUT_DB_USER", INPUT_DB_USER),
+            ("INPUT_DB_PASSWORD", INPUT_DB_PASSWORD),
+        ]:
+            if not v:
+                faltan.append(k)
 
     macro_users = {
         "CENTRO": (USER_CENTRO, PASSWORD_CENTRO),
@@ -2697,10 +2899,19 @@ def load_config_from_env() -> dict:
         "DOWNLOAD_DIR_PRIMARY": DOWNLOAD_DIR_PRIMARY,
         "DOWNLOAD_DIR_MIRRORS": DOWNLOAD_DIR_MIRRORS,
 
+        "INPUT_SOURCE": INPUT_SOURCE,
+        "DB_VIEW_NAME": DB_VIEW_NAME,
+        "INPUT_DB_HOST": INPUT_DB_HOST,
+        "INPUT_DB_PORT": int(INPUT_DB_PORT),
+        "INPUT_DB_DATABASE": INPUT_DB_DATABASE,
+        "INPUT_DB_USER": INPUT_DB_USER,
+        "INPUT_DB_PASSWORD": INPUT_DB_PASSWORD,
+
         "GSHEET_URL": GSHEET_URL,
         "CREDS_JSON": CREDS_JSON,
         "FINAL_PUBLISH_DIR": FINAL_PUBLISH_DIR,
         "FINAL_PUBLISH_MIRRORS": FINAL_PUBLISH_MIRRORS,
+        "FINAL_PUBLISH_REPLACE_PERIOD": bool(FINAL_PUBLISH_REPLACE_PERIOD),
         "GSHEET_TABS": GSHEET_TABS,
 
         "CLOSE_MONTH": CLOSE_MONTH,
@@ -2742,6 +2953,11 @@ def load_config_from_env() -> dict:
         "HEALTHCHECK_BLOCKING": bool(HEALTHCHECK_BLOCKING),
         "DB_PRECHECK_ENABLED": bool(DB_PRECHECK_ENABLED),
         "DB_CONNECT_TIMEOUT_SECONDS": int(DB_CONNECT_TIMEOUT_SECONDS),
+        "OVERRIDES_ENABLED": bool(OVERRIDES_ENABLED),
+        "FALLBACK_ENABLED": bool(FALLBACK_ENABLED),
+        "OVERRIDE_LEARNING_ENABLED": bool(OVERRIDE_LEARNING_ENABLED),
+        "STAGING_LOAD_ENABLED": bool(STAGING_LOAD_ENABLED),
+        "REFRESH_MENSUAL_ENABLED": bool(REFRESH_MENSUAL_ENABLED),
         "SMTP_HOST": SMTP_HOST,
         "SMTP_PORT": SMTP_PORT,
         "SMTP_USER": SMTP_USER,
@@ -2925,6 +3141,9 @@ def main():
     DOWNLOAD_DIR_MIRRORS = cfg["DOWNLOAD_DIR_MIRRORS"]
     FINAL_PUBLISH_DIR = cfg["FINAL_PUBLISH_DIR"]
     FINAL_PUBLISH_MIRRORS = cfg["FINAL_PUBLISH_MIRRORS"]
+    FINAL_PUBLISH_REPLACE_PERIOD = cfg["FINAL_PUBLISH_REPLACE_PERIOD"]
+    INPUT_SOURCE = cfg["INPUT_SOURCE"]
+    DB_VIEW_NAME = cfg["DB_VIEW_NAME"]
     GSHEET_URL = cfg["GSHEET_URL"]
     CREDS_JSON = cfg["CREDS_JSON"]
     DOWNLOAD_TIMEOUT = cfg["DOWNLOAD_TIMEOUT"]
@@ -2958,6 +3177,11 @@ def main():
     HEALTHCHECK_BLOCKING = cfg["HEALTHCHECK_BLOCKING"]
     DB_PRECHECK_ENABLED = cfg["DB_PRECHECK_ENABLED"]
     DB_CONNECT_TIMEOUT_SECONDS = cfg["DB_CONNECT_TIMEOUT_SECONDS"]
+    OVERRIDES_ENABLED = cfg["OVERRIDES_ENABLED"]
+    FALLBACK_ENABLED = cfg["FALLBACK_ENABLED"]
+    OVERRIDE_LEARNING_ENABLED = cfg["OVERRIDE_LEARNING_ENABLED"]
+    STAGING_LOAD_ENABLED = cfg["STAGING_LOAD_ENABLED"]
+    REFRESH_MENSUAL_ENABLED = cfg["REFRESH_MENSUAL_ENABLED"]
 
     TODAY = datetime.date.today()
 
@@ -2996,7 +3220,11 @@ def main():
 
         summary(summary_path, f"TARGET_MONTH | {LABEL}")
         summary(summary_path, f"RANGE | {FE_INI} -> {FE_FIN} | TAG={TAG}")
-        summary(summary_path, f"GSHEET_TABS | {TABS}")
+        summary(summary_path, f"INPUT_SOURCE | {INPUT_SOURCE}")
+        if INPUT_SOURCE == "GSHEET":
+            summary(summary_path, f"GSHEET_TABS | {TABS}")
+        else:
+            summary(summary_path, f"DB_VIEW_NAME | {DB_VIEW_NAME}")
 
         db = None
         job_id = None
@@ -3069,39 +3297,61 @@ def main():
                 overall_exit = max(overall_exit, 3)
                 continue
 
-        # ===== leer checks del mes desde tabs y merge/dedupe + macro =====
-        failure_stage = "GSHEET_READ"
+        # ===== leer centros/IPRESS desde fuente funcional configurada =====
+        failure_stage = "INPUT_READ"
         try:
-            log_fn = lambda m: summary(summary_path, m)
+            if INPUT_SOURCE == "DB_VIEW":
+                centros_meta, db_view_stats = get_centros_from_db_view(
+                    host=cfg["INPUT_DB_HOST"],
+                    port=cfg["INPUT_DB_PORT"],
+                    database=cfg["INPUT_DB_DATABASE"],
+                    user=cfg["INPUT_DB_USER"],
+                    password=cfg["INPUT_DB_PASSWORD"],
+                    view_name=DB_VIEW_NAME,
+                    connect_timeout=DB_CONNECT_TIMEOUT_SECONDS,
+                )
+                dup_global = int(db_view_stats.get("dup", 0))
+                macro_conflict = 0
+                month_headers_used = [f"DB_VIEW:{DB_VIEW_NAME}"]
+                stats_by_tab = {}
+            else:
+                log_fn = lambda m: summary(summary_path, m)
 
-            all_items: List[Dict[str, str]] = []
-            stats_by_tab = {}
-            month_headers_used = []
+                all_items: List[Dict[str, str]] = []
+                stats_by_tab = {}
+                month_headers_used = []
 
-            client = _gsheet_call_with_retry(lambda: _get_gspread_client(CREDS_JSON), log_fn=log_fn)
+                client = _gsheet_call_with_retry(lambda: _get_gspread_client(CREDS_JSON), log_fn=log_fn)
 
-            for mnum in [month_num]:
-                mh = MONTHS_ES.get(mnum, f"{mnum:02d}")
-                month_headers_used.append(mh)
+                for mnum in [month_num]:
+                    mh = MONTHS_ES.get(mnum, f"{mnum:02d}")
+                    month_headers_used.append(mh)
 
-                for t in TABS:
-                    items, st, _ = read_checked_centros_with_macro_from_tab(
-                        client, GSHEET_URL, t, mnum, log_fn=log_fn
-                    )
-                    stats_key = f"{t}|{mh}"
-                    stats_by_tab[stats_key] = st
-                    all_items.extend(items)
+                    for t in TABS:
+                        items, st, _ = read_checked_centros_with_macro_from_tab(
+                            client, GSHEET_URL, t, mnum, log_fn=log_fn
+                        )
+                        stats_key = f"{t}|{mh}"
+                        stats_by_tab[stats_key] = st
+                        all_items.extend(items)
 
-            centros_meta, dup_global, macro_conflict = merge_centros_meta_items(all_items)
+                centros_meta, dup_global, macro_conflict = merge_centros_meta_items(all_items)
 
         except Exception as e:
             failure_detail = f"{type(e).__name__}: {e}"
-            summary(summary_path, f"ERROR | GSHEET_READ | {LABEL} | {failure_detail}")
+            summary(summary_path, f"ERROR | INPUT_READ | source={INPUT_SOURCE} | {LABEL} | {failure_detail}")
             summary(summary_path, f"FAIL_CLASS | stage={failure_stage} | detail={failure_detail}")
             overall_exit = max(overall_exit, 2)
             continue
 
         summary(summary_path, f"MONTH_CHECKS | {month_headers_used}")
+        if INPUT_SOURCE == "DB_VIEW":
+            summary(
+                summary_path,
+                f"DB_VIEW_SOURCE | view={DB_VIEW_NAME} | selected={db_view_stats.get('selected',0)} | "
+                f"dup={db_view_stats.get('dup',0)} | empty={db_view_stats.get('empty',0)} | "
+                f"invalid_macro={db_view_stats.get('invalid_macro',0)}"
+            )
         for key, st in stats_by_tab.items():
             summary(
                 summary_path,
@@ -3109,15 +3359,15 @@ def main():
                 f"unchecked={st.get('unchecked',0)} | empty={st.get('empty',0)} | invalid_macro={st.get('invalid_macro',0)}"
             )
 
-        summary(summary_path, f"GSHEET_MERGE | selected_total={len(centros_meta)} | dup_global={dup_global} | macro_conflict={macro_conflict}")
+        summary(summary_path, f"INPUT_MERGE | selected_total={len(centros_meta)} | dup_global={dup_global} | macro_conflict={macro_conflict}")
 
         if db and run_db_id:
             try:
                 db.log_event(
                     run_db_id,
                     "INFO",
-                    "GSHEET_MERGE",
-                    f"selected_total={len(centros_meta)} | dup_global={dup_global} | macro_conflict={macro_conflict}"
+                    "INPUT_MERGE",
+                    f"source={INPUT_SOURCE} | selected_total={len(centros_meta)} | dup_global={dup_global} | macro_conflict={macro_conflict}"
                 )
             except Exception as e:
                 print(f"DB_LOG_WARN | {type(e).__name__}: {e}", flush=True)
@@ -3134,7 +3384,7 @@ def main():
             final_status = "SUCCESS"
             failure_stage = ""
             failure_detail = ""
-            summary(summary_path, f"NO_WORK | No hay IPRESS marcadas para el mes {month_header}.")
+            summary(summary_path, f"NO_WORK | No hay IPRESS objetivo para el mes {month_header} | source={INPUT_SOURCE}.")
             if db and run_db_id:
                 try:
                     db.finish_run(
@@ -3152,18 +3402,26 @@ def main():
 
         print("\n===== CONFIGURACIÓN (MENSUAL) =====", flush=True)
         print(f"Periodo       : {LABEL}", flush=True)
-        print(f"Mes (checks)  : {month_header}", flush=True)
+        print(f"Fuente input  : {INPUT_SOURCE}", flush=True)
+        if INPUT_SOURCE == "DB_VIEW":
+            print(f"Vista DB      : {DB_VIEW_NAME}", flush=True)
+        else:
+            print(f"Mes (checks)  : {month_header}", flush=True)
         print(f"Rango         : {FE_INI} -> {FE_FIN}", flush=True)
         print(f"TAG           : {TAG}", flush=True)
         print(f"FILE_SUFFIX   : {FILE_SUFFIX}", flush=True)
         print(f"Rutas descarga: {DOWNLOAD_DIR_LIST}", flush=True)
         print(f"Ruta publish  : {FINAL_PUBLISH_DIR}", flush=True)
         print(f"Mirrors       : {FINAL_PUBLISH_MIRRORS}", flush=True)
+        print(f"Publish mode  : replace_period={FINAL_PUBLISH_REPLACE_PERIOD}", flush=True)
         print(f"Profile base  : {PROFILE_BASE_DIR}", flush=True)
         print(f"Driver starts : {cfg['MAX_CONCURRENT_DRIVER_STARTS']}", flush=True)
         print(f"Healthcheck   : enabled={HEALTHCHECK_ENABLED} | blocking={HEALTHCHECK_BLOCKING}", flush=True)
+        print(f"Overrides     : enabled={OVERRIDES_ENABLED} | learning={OVERRIDE_LEARNING_ENABLED}", flush=True)
+        print(f"Fallback      : enabled={FALLBACK_ENABLED}", flush=True)
+        print(f"DB load       : staging={STAGING_LOAD_ENABLED} | refresh={REFRESH_MENSUAL_ENABLED}", flush=True)
         print(f"MACRO_USERS   : { {k: v[0] for k, v in MACRO_USERS.items()} }", flush=True)
-        print(f"INPUT | Centros (checks merge) ({len(centros_meta)}): {centros_meta}", flush=True)
+        print(f"INPUT | Centros objetivo ({len(centros_meta)}): {centros_meta}", flush=True)
         print("===================================\n", flush=True)
 
         summary(summary_path, f"MAX_CONCURRENT_DRIVER_STARTS | {cfg['MAX_CONCURRENT_DRIVER_STARTS']}")
@@ -3227,6 +3485,9 @@ def main():
                 HEALTHCHECK_ENABLED=HEALTHCHECK_ENABLED,
                 HEALTHCHECK_BLOCKING=HEALTHCHECK_BLOCKING,
                 override_map=override_map,
+                overrides_enabled=OVERRIDES_ENABLED,
+                fallback_enabled=FALLBACK_ENABLED,
+                override_learning_enabled=OVERRIDE_LEARNING_ENABLED,
                 db=db,
                 run_uuid=run_id,
                 run_db_id=run_db_id
@@ -3253,17 +3514,20 @@ def main():
                                 cargado_stg=False
                             )
 
-                            procesar_txt_a_staging(
-                                db=db,
-                                id_run=run_db_id,
-                                run_uuid=run_id,
-                                id_archivo=id_archivo,
-                                file_name=item["archivo"],
-                                file_path=item.get("archivo_path", ""),
-                                summary_path=summary_path,
-                                periodo_proceso=periodo_proceso,
-                                target_table="stg.cext_prod_mensual"
-                            )
+                            if STAGING_LOAD_ENABLED:
+                                procesar_txt_a_staging(
+                                    db=db,
+                                    id_run=run_db_id,
+                                    run_uuid=run_id,
+                                    id_archivo=id_archivo,
+                                    file_name=item["archivo"],
+                                    file_path=item.get("archivo_path", ""),
+                                    summary_path=summary_path,
+                                    periodo_proceso=periodo_proceso,
+                                    target_table="stg.cext_prod_mensual"
+                                )
+                            else:
+                                summary(summary_path, f"STAGING_LOAD_SKIP | file={item['archivo']} | motivo=STAGING_LOAD_ENABLED=false")
 
                         except Exception as e:
                             print(f"DB_FILE_WARN | {item.get('archivo')} | {type(e).__name__}: {e}", flush=True)
@@ -3313,6 +3577,7 @@ def main():
                     file_suffix=FILE_SUFFIX,
                     summary_path=summary_path,
                     expected_centers=descargados_total_ordenado,
+                    replace_period=FINAL_PUBLISH_REPLACE_PERIOD,
                     db=db,
                     run_db_id=run_db_id
                 )
@@ -3337,6 +3602,7 @@ def main():
                             file_suffix=FILE_SUFFIX,
                             summary_path=summary_path,
                             expected_centers=descargados_total_ordenado,
+                            replace_period=FINAL_PUBLISH_REPLACE_PERIOD,
                             db=db,
                             run_db_id=run_db_id
                         )
@@ -3461,7 +3727,7 @@ def main():
             except Exception as e:
                 print(f"ALERT_SUMMARY_WARN | {type(e).__name__}: {e}", flush=True)
 
-        if db and run_db_id and final_status in ("SUCCESS", "PARTIAL_SUCCESS"):
+        if db and run_db_id and final_status in ("SUCCESS", "PARTIAL_SUCCESS") and REFRESH_MENSUAL_ENABLED:
             failure_stage = "REFRESH"
             try:
                 total_medicos = sync_medicos_cenate_from_241(
@@ -3597,6 +3863,8 @@ def main():
                     )
                 except Exception as e2:
                     print(f"REPORT_STATUS_ERROR_WARN | {type(e2).__name__}: {e2}", flush=True)
+        elif db and run_db_id and final_status in ("SUCCESS", "PARTIAL_SUCCESS"):
+            summary(summary_path, "REFRESH_MENSUAL_ACTUAL_SKIP | motivo=REFRESH_MENSUAL_ENABLED=false")
 
         if db and run_db_id:
             try:

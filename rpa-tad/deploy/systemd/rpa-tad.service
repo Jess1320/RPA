@@ -1,0 +1,15 @@
+[Unit]
+Description=RPA Tele Apoyo al Diagnostico
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=cenate
+WorkingDirectory=/home/cenate/rpa_tad
+Environment=ENV_FILE=.env
+Environment=RPA_USERS_ENV_FILE=/home/cenate/shared/config/.env_usuarios
+Environment=TZ=America/Lima
+ExecStart=/home/cenate/rpa_tad/scripts/run_rpa_tad.sh
+TimeoutStartSec=1h
+TimeoutStopSec=10min

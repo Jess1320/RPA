@@ -1,0 +1,10 @@
+[Unit]
+Description=Timer RPA Medico y No Medico
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+Persistent=false
+Unit=rpa-medico-no-medico.service
+
+[Install]
+WantedBy=timers.target

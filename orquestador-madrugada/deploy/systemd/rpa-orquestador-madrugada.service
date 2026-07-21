@@ -1,0 +1,20 @@
+[Unit]
+Description=Orquestador nocturno RPAs madrugada
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=cenate
+Group=cenate
+WorkingDirectory=/home/cenate/rpa_orquestador_madrugada
+Environment=HOME=/home/cenate
+Environment=PATH=/home/cenate/rpa_cext_diario/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=ENV_FILE=.env
+ExecStart=/home/cenate/rpa_orquestador_madrugada/scripts/run_orquestador_madrugada.sh
+Nice=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

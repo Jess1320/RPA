@@ -1,0 +1,10 @@
+[Unit]
+Description=Timer RPA Tele Psicoprofilaxis
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+Persistent=false
+Unit=rpa-tele-psicoprofilaxis.service
+
+[Install]
+WantedBy=timers.target

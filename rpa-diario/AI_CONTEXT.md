@@ -25,7 +25,7 @@ La diferencia entre RPAs aparece despues de seleccionar el centro/IPRESS: cada R
 ## Restricciones importantes
 
 - No subir credenciales reales.
-- No repetir credenciales en cada proyecto si se puede centralizar la configuracion.
+- No repetir credenciales en cada proyecto; usar `RPA_USERS_ENV_FILE` o `shared/config/.env_usuarios`.
 - No considerar a la IA como fuente autoritativa del estado transaccional.
 - El estado oficial debe derivarse por reglas deterministicas.
 - No calcular `overall_status` antes de cerrar las etapas criticas.
@@ -67,4 +67,3 @@ Una corrida solo debe considerarse lista para consumo cuando:
 - Sincronizacion y refresh criticos finalizaron.
 - `data_ready = true`.
 - `overall_status` esta en `SUCCESS` o `SUCCESS_WITH_WARNINGS`.
-

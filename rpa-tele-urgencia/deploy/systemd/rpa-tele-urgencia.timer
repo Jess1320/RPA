@@ -1,0 +1,10 @@
+[Unit]
+Description=Timer RPA Tele Urgencia
+
+[Timer]
+OnCalendar=*-*-* 06:00:00
+Persistent=false
+Unit=rpa-tele-urgencia.service
+
+[Install]
+WantedBy=timers.target
