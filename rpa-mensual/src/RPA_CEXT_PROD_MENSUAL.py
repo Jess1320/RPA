@@ -538,6 +538,16 @@ def write_failed_center_details(summary_path: str, rows: List[Dict[str, str]]) -
         )
 
 
+def parse_only_centros(value: str) -> set:
+    return {_canon_code(x) for x in re.split(r"[,;\s]+", value or "") if x.strip()}
+
+
+def filter_centros_meta(centros_meta: List[Dict[str, str]], only_centros: set) -> List[Dict[str, str]]:
+    if not only_centros:
+        return centros_meta
+    return [item for item in centros_meta if _canon_code(item.get("centro", "")) in only_centros]
+
+
 
 
 def procesar_txt_a_staging(
@@ -2808,6 +2818,7 @@ def load_config_from_env() -> dict:
 
     INPUT_SOURCE = _norm_cell(_env_str("INPUT_SOURCE", "GSHEET"))
     DB_VIEW_NAME = _env_str("DB_VIEW_NAME", "essi.vw_rpa_mensual_centros_objetivo_v1")
+    ONLY_CENTROS = _env_str("ONLY_CENTROS", "")
 
     GSHEET_URL = _env_str("GSHEET_URL")
     CREDS_JSON = _env_str("CREDS_JSON")
@@ -2986,6 +2997,7 @@ def load_config_from_env() -> dict:
 
         "INPUT_SOURCE": INPUT_SOURCE,
         "DB_VIEW_NAME": DB_VIEW_NAME,
+        "ONLY_CENTROS": ONLY_CENTROS,
         "INPUT_DB_HOST": INPUT_DB_HOST,
         "INPUT_DB_PORT": int(INPUT_DB_PORT),
         "INPUT_DB_DATABASE": INPUT_DB_DATABASE,
@@ -3445,6 +3457,17 @@ def main():
             )
 
         summary(summary_path, f"INPUT_MERGE | selected_total={len(centros_meta)} | dup_global={dup_global} | macro_conflict={macro_conflict}")
+        only_centros = parse_only_centros(cfg.get("ONLY_CENTROS", ""))
+        if only_centros:
+            before_filter = len(centros_meta)
+            centros_meta = filter_centros_meta(centros_meta, only_centros)
+            found_filter = sorted({_canon_code(x.get("centro", "")) for x in centros_meta})
+            missing_filter = sorted(only_centros - set(found_filter))
+            summary(
+                summary_path,
+                f"ONLY_CENTROS | requested={sorted(only_centros)} | selected={len(centros_meta)}/{before_filter} | "
+                f"missing={missing_filter}"
+            )
 
         if db and run_db_id:
             try:
