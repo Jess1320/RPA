@@ -453,6 +453,91 @@ def merge_centros_meta_items(items: List[Dict[str, str]]) -> Tuple[List[Dict[str
     return list(centros_map.values()), dup_global, macro_conflict
 
 
+def _clean_report_value(value, default: str = "-") -> str:
+    text = str(value or "").strip()
+    if not text:
+        return default
+    return text.replace("|", "/")
+
+
+def build_failed_center_details(
+    failed_centros,
+    centros_meta: List[Dict[str, str]],
+    macro_users: Dict[str, Tuple[str, str]],
+    resultados_todos,
+) -> List[Dict[str, str]]:
+    meta_by_center = {_canon_code(item.get("centro", "")): item for item in centros_meta or []}
+    reasons_by_center: Dict[str, set] = {}
+    users_by_center: Dict[str, set] = {}
+
+    for item in resultados_todos or []:
+        if item.get("status") == "OK":
+            continue
+        centro = _canon_code(item.get("centro", ""))
+        if not centro:
+            continue
+        reasons_by_center.setdefault(centro, set()).add(_clean_report_value(item.get("motivo"), "SIN_MOTIVO"))
+        usuario = _clean_report_value(item.get("usuario"), "")
+        if usuario:
+            users_by_center.setdefault(centro, set()).add(usuario)
+
+    rows = []
+    for raw_centro in failed_centros or []:
+        centro = _canon_code(raw_centro)
+        meta = meta_by_center.get(centro, {})
+        macro = _clean_report_value(meta.get("macro"))
+        usuario_objetivo = ""
+        if macro_users and macro in macro_users:
+            usuario_objetivo = _clean_report_value(macro_users[macro][0])
+
+        rows.append({
+            "centro": _clean_report_value(meta.get("centro") or raw_centro),
+            "ipress": _clean_report_value(meta.get("ipress") or meta.get("nombre")),
+            "red": _clean_report_value(meta.get("desc_red") or meta.get("red")),
+            "macro": macro,
+            "usuario": usuario_objetivo or _clean_report_value(",".join(sorted(users_by_center.get(centro, set())))),
+            "motivo": _clean_report_value(", ".join(sorted(reasons_by_center.get(centro, set()))), "NO_DETALLADO"),
+            "intentos": _clean_report_value(", ".join(sorted(users_by_center.get(centro, set())))),
+        })
+    return rows
+
+
+def format_failed_center_details(rows: List[Dict[str, str]], limit: int = 80) -> str:
+    if not rows:
+        return "  - Ninguna"
+    lines = []
+    for row in rows[:limit]:
+        parts = [
+            row.get("centro", "-"),
+            row.get("ipress", "-"),
+            row.get("red", "-"),
+            f"Macro: {row.get('macro', '-')}",
+            f"Usuario a habilitar: {row.get('usuario', '-')}",
+            f"Motivo: {row.get('motivo', 'SIN_MOTIVO')}",
+        ]
+        if row.get("intentos") and row.get("intentos") != row.get("usuario"):
+            parts.append(f"Intentos: {row.get('intentos')}")
+        lines.append("  - " + " | ".join(parts))
+    if len(rows) > limit:
+        lines.append(f"  - ... {len(rows) - limit} IPRESS adicionales en el log adjunto.")
+    return "\n".join(lines)
+
+
+def write_failed_center_details(summary_path: str, rows: List[Dict[str, str]]) -> None:
+    for row in rows or []:
+        summary(
+            summary_path,
+            "FAIL_CENTER_DETAIL | "
+            f"centro={row.get('centro', '-')} | "
+            f"ipress={row.get('ipress', '-')} | "
+            f"red={row.get('red', '-')} | "
+            f"macro={row.get('macro', '-')} | "
+            f"usuario={row.get('usuario', '-')} | "
+            f"motivo={row.get('motivo', 'SIN_MOTIVO')} | "
+            f"intentos={row.get('intentos', '-')}"
+        )
+
+
 
 
 def procesar_txt_a_staging(
@@ -2983,6 +3068,7 @@ def build_run_email_body(
     total_ok: int,
     total_fail: int,
     failed_centros,
+    failed_center_details,
     resultados_todos,
     failure_stage: str,
     failure_detail: str,
@@ -3009,9 +3095,7 @@ def build_run_email_body(
         [f"  - {k}: {v}" for k, v in sorted(fail_by_reason.items(), key=lambda x: (-x[1], x[0]))]
     ) or "  - Sin fallas por motivo"
 
-    failed_centros_text = ", ".join(failed_centros[:80]) if failed_centros else "Ninguna"
-    if failed_centros and len(failed_centros) > 80:
-        failed_centros_text += f" ... (+{len(failed_centros) - 80} más)"
+    failed_centros_text = format_failed_center_details(failed_center_details)
 
     body = [
         "Buenas tardes,",
@@ -3039,8 +3123,8 @@ def build_run_email_body(
         ])
 
     body.extend([
-        "IPRESS fallidas:",
-        f"  - {failed_centros_text}",
+        "IPRESS fallidas / accesos a habilitar:",
+        failed_centros_text,
         "",
         "Fallas por usuario:",
         user_lines,
@@ -3086,6 +3170,7 @@ def main():
     resultados_todos = []
     descargados_total_ordenado = []
     centros_pendientes_ordenado = []
+    failed_center_details = []
 
     final_publish_ok = False
     mirror_publish_failed = False
@@ -3496,6 +3581,13 @@ def main():
             summary(summary_path, f"TOTAL_INPUT | {len(centros)}")
             summary(summary_path, f"TOTAL_OK | {len(descargados_total_ordenado)} | {descargados_total_ordenado}")
             summary(summary_path, f"TOTAL_FAIL | {len(centros_pendientes_ordenado)} | {centros_pendientes_ordenado}")
+            failed_center_details = build_failed_center_details(
+                centros_pendientes_ordenado,
+                centros_meta,
+                MACRO_USERS,
+                resultados_todos,
+            )
+            write_failed_center_details(summary_path, failed_center_details)
 
             if centros_pendientes_ordenado and overall_exit != 130:
                 overall_exit = max(overall_exit, 2)
@@ -3920,6 +4012,7 @@ def main():
                 total_ok=len(descargados_total_ordenado),
                 total_fail=len(centros_pendientes_ordenado),
                 failed_centros=centros_pendientes_ordenado,
+                failed_center_details=failed_center_details,
                 resultados_todos=resultados_todos,
                 failure_stage=failure_stage,
                 failure_detail=failure_detail,

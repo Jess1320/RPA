@@ -93,6 +93,13 @@ def mask_login(value: str) -> str:
     return f"{value[:2]}***{value[-2:]}"
 
 
+def canon_center_code(value: str) -> str:
+    text = str(value or "").strip()
+    if text.isdigit():
+        return str(int(text))
+    return text
+
+
 def short_path(path: str) -> str:
     return path or "-"
 
@@ -146,6 +153,8 @@ def safe_file_token(value: str) -> str:
 class Failure:
     rpa: str
     centro: str = ""
+    ipress: str = ""
+    red: str = ""
     tipo: str = ""
     usuario: str = ""
     login: str = ""
@@ -418,6 +427,29 @@ def parse_int_list_line(log_text: str, key: str) -> tuple[Optional[int], List[st
     return int(count_raw), items
 
 
+def parse_key_value_detail(line: str) -> Dict[str, str]:
+    values: Dict[str, str] = {}
+    for part in line.split("|")[1:]:
+        if "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        values[key.strip()] = value.strip()
+    return values
+
+
+def parse_fail_center_details(log_text: str) -> Dict[str, Dict[str, str]]:
+    details: Dict[str, Dict[str, str]] = {}
+    for line in (log_text or "").splitlines():
+        if "FAIL_CENTER_DETAIL |" not in line:
+            continue
+        data = parse_key_value_detail(line)
+        centro = data.get("centro", "").strip()
+        if centro:
+            details[centro] = data
+            details[canon_center_code(centro)] = data
+    return details
+
+
 def parse_summary_csv(result: JobResult, login_by_user: Dict[str, str]) -> None:
     path = result.summary_csv
     if not path or not os.path.exists(path):
@@ -516,6 +548,7 @@ def parse_mensual_result(result: JobResult) -> None:
 
     total_ok, ok_centers = parse_int_list_line(combined, "TOTAL_OK")
     total_fail, fail_centers = parse_int_list_line(combined, "TOTAL_FAIL")
+    fail_details = parse_fail_center_details(combined)
     total_input = None
     input_match = re.findall(r"TOTAL_INPUT\s*\|\s*(\d+)", combined)
     if input_match:
@@ -534,19 +567,33 @@ def parse_mensual_result(result: JobResult) -> None:
         if fail_centers and centro not in set(fail_centers):
             continue
         masked = mask_login(login.strip())
+        detail = fail_details.get(centro, {}) or fail_details.get(canon_center_code(centro), {})
         fail_by_center[centro] = Failure(
             rpa=result.config.name,
             centro=centro,
-            usuario=login_to_label.get(masked, ""),
+            ipress=detail.get("ipress", ""),
+            red=detail.get("red", ""),
+            macro=detail.get("macro", ""),
+            usuario=detail.get("usuario", "") or login_to_label.get(masked, ""),
             login=masked,
-            motivo=motivo.strip() or "SIN_MOTIVO",
+            motivo=detail.get("motivo", "") or motivo.strip() or "SIN_MOTIVO",
             raw="run.log",
         )
 
     for centro in fail_centers:
+        detail = fail_details.get(centro, {}) or fail_details.get(canon_center_code(centro), {})
         fail_by_center.setdefault(
             centro,
-            Failure(rpa=result.config.name, centro=centro, motivo="NO_DETALLADO", raw="TOTAL_FAIL"),
+            Failure(
+                rpa=result.config.name,
+                centro=centro,
+                ipress=detail.get("ipress", ""),
+                red=detail.get("red", ""),
+                macro=detail.get("macro", ""),
+                usuario=detail.get("usuario", ""),
+                motivo=detail.get("motivo", "") or "NO_DETALLADO",
+                raw="TOTAL_FAIL",
+            ),
         )
 
     fail_class_rx = re.compile(r"FAIL_CLASS\s*\|\s*stage=([^|]+)\|\s*detail=([^\n]+)")
@@ -712,10 +759,16 @@ def build_email_body(
                 parts = []
                 if failure.centro:
                     parts.append(f"IPRESS {failure.centro}")
+                if failure.ipress:
+                    parts.append(f"centro {failure.ipress}")
+                if failure.red:
+                    parts.append(f"red {failure.red}")
+                if failure.macro:
+                    parts.append(f"macro {failure.macro}")
                 if failure.tipo:
                     parts.append(f"tipo {failure.tipo}")
                 if failure.usuario:
-                    parts.append(f"usuario {failure.usuario}")
+                    parts.append(f"usuario a habilitar {failure.usuario}")
                 if failure.login:
                     parts.append(f"login {failure.login}")
                 if failure.fase:
@@ -752,7 +805,7 @@ def write_report_files(results: List[JobResult], run_dir: str) -> List[str]:
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         fields = [
             "rpa", "fase_ejecucion", "mes_a_procesar", "periodo", "estado", "exit_code", "inicio", "fin", "duracion_seg",
-            "total_input", "total_ok", "total_fail", "centro", "tipo",
+            "total_input", "total_ok", "total_fail", "centro", "ipress", "red", "tipo",
             "usuario", "login", "macro", "motivo", "fase_error", "archivo", "run_dir",
         ]
         writer = csv.DictWriter(f, fieldnames=fields)
@@ -774,6 +827,8 @@ def write_report_files(results: List[JobResult], run_dir: str) -> List[str]:
                     "total_ok": result.total_ok,
                     "total_fail": result.total_fail,
                     "centro": failure.centro,
+                    "ipress": failure.ipress,
+                    "red": failure.red,
                     "tipo": failure.tipo,
                     "usuario": failure.usuario,
                     "login": failure.login,
