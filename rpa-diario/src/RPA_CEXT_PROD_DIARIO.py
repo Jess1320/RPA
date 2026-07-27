@@ -17,6 +17,7 @@ import time
 import datetime
 import subprocess
 import psycopg2
+from psycopg2 import sql
 from psycopg2.extras import RealDictCursor
 import threading
 import signal
@@ -591,6 +592,102 @@ def merge_centros_meta_items(items: List[Dict[str, str]]) -> Tuple[List[Dict[str
         centros_map[canon] = item
 
     return list(centros_map.values()), dup_global, macro_conflict
+
+
+def _split_qualified_name(name: str) -> Tuple[str, str]:
+    parts = [p.strip() for p in (name or "").split(".") if p.strip()]
+    if len(parts) != 2:
+        raise RuntimeError(f"DB_VIEW_NAME debe venir como esquema.vista: {name}")
+    for part in parts:
+        if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", part):
+            raise RuntimeError(f"DB_VIEW_NAME contiene identificador invalido: {name}")
+    return parts[0], parts[1]
+
+
+def get_centros_from_db_view(
+    *,
+    host: str,
+    port: int,
+    database: str,
+    user: str,
+    password: str,
+    view_name: str,
+    connect_timeout: int = 10,
+) -> Tuple[List[Dict[str, str]], Dict[str, int]]:
+    schema, view = _split_qualified_name(view_name)
+    query = sql.SQL("""
+        select
+            codigo_centro,
+            desc_macro,
+            desc_red,
+            ipress,
+            cod_ori_ipress,
+            total_programaciones,
+            total_profesionales,
+            programaciones_aprobadas,
+            programaciones_bloqueadas,
+            programaciones_suspendidas,
+            estado_prioritario,
+            ultima_actualizacion_ws
+        from {}.{}
+        where activo = true
+        order by desc_macro, desc_red, codigo_centro;
+    """).format(sql.Identifier(schema), sql.Identifier(view))
+
+    selected: List[Dict[str, str]] = []
+    seen = set()
+    dup = 0
+    empty = 0
+    invalid_macro = 0
+
+    with psycopg2.connect(
+        host=host,
+        port=int(port),
+        dbname=database,
+        user=user,
+        password=password,
+        connect_timeout=int(connect_timeout),
+    ) as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(query)
+            rows = cur.fetchall()
+
+    for row in rows:
+        raw_cod = str(row.get("codigo_centro") or "").strip()
+        if not raw_cod:
+            empty += 1
+            continue
+
+        centro = raw_cod.zfill(3) if raw_cod.isdigit() else raw_cod
+        canon = _canon_code(centro)
+        if canon in seen:
+            dup += 1
+            continue
+
+        macro = _norm_macro(str(row.get("desc_macro") or ""))
+        if macro not in VALID_MACROS:
+            invalid_macro += 1
+            macro = INVALID_MACRO_LABEL
+
+        seen.add(canon)
+        selected.append({
+            "centro": centro,
+            "macro": macro,
+            "source": "DB_VIEW",
+            "desc_red": str(row.get("desc_red") or ""),
+            "ipress": str(row.get("ipress") or ""),
+            "cod_ori_ipress": str(row.get("cod_ori_ipress") or ""),
+            "total_programaciones": str(row.get("total_programaciones") or 0),
+            "total_profesionales": str(row.get("total_profesionales") or 0),
+            "estado_prioritario": str(row.get("estado_prioritario") or ""),
+        })
+
+    return selected, {
+        "selected": len(selected),
+        "dup": dup,
+        "empty": empty,
+        "invalid_macro": invalid_macro,
+    }
 
 
 def procesar_txt_a_staging(
@@ -2682,6 +2779,9 @@ def load_config_from_env() -> dict:
     DOWNLOAD_DIR_LEGACY = _env_str("DOWNLOAD_DIR", "")
     FINAL_PUBLISH_DIR = _env_str("FINAL_PUBLISH_DIR", "")
 
+    INPUT_SOURCE = _norm_cell(_env_str("INPUT_SOURCE", "GSHEET"))
+    DB_VIEW_NAME = _env_str("DB_VIEW_NAME", "essi.vw_rpa_mensual_centros_objetivo_v1")
+
     GSHEET_URL = _env_str("GSHEET_URL")
     CREDS_JSON = _env_str("CREDS_JSON")
 
@@ -2757,6 +2857,12 @@ def load_config_from_env() -> dict:
     SRC241_USER = _env_str("SRC241_USER", "")
     SRC241_PASSWORD = _env_str("SRC241_PASSWORD", "")
 
+    INPUT_DB_HOST = _env_str("INPUT_DB_HOST", SRC241_HOST)
+    INPUT_DB_PORT = _env_int("INPUT_DB_PORT", str(SRC241_PORT))
+    INPUT_DB_DATABASE = _env_str("INPUT_DB_DATABASE", SRC241_DATABASE)
+    INPUT_DB_USER = _env_str("INPUT_DB_USER", SRC241_USER)
+    INPUT_DB_PASSWORD = _env_str("INPUT_DB_PASSWORD", SRC241_PASSWORD)
+
     RPA_JOB_CODE = _env_str("RPA_JOB_CODE", "CEXT_PROD_DIARIO")
     RPA_JOB_NAME = _env_str("RPA_JOB_NAME", "RPA Consulta Externa Producción Diario")
     RPA_RUN_TYPE = _env_str("RPA_RUN_TYPE", "DIARIO")
@@ -2796,8 +2902,6 @@ def load_config_from_env() -> dict:
     for k, v in [
         ("URL_HOME", URL_HOME),
         ("FRM_MASIVAS", URL_MASIVAS),
-        ("GSHEET_URL", GSHEET_URL),
-        ("CREDS_JSON", CREDS_JSON),
     ("FINAL_PUBLISH_DIR", FINAL_PUBLISH_DIR),
         ("PG_HOST", PG_HOST),
         ("PG_DATABASE", PG_DATABASE),
@@ -2811,8 +2915,29 @@ def load_config_from_env() -> dict:
         if not v:
             faltan.append(k)
 
-    if len(GSHEET_TABS) == 0:
-        faltan.append("GSHEET_TABS o GSHEET_TAB (con 2 tabs separadas por coma)")
+    if INPUT_SOURCE not in ("GSHEET", "DB_VIEW"):
+        faltan.append("INPUT_SOURCE debe ser GSHEET o DB_VIEW")
+
+    if INPUT_SOURCE == "GSHEET":
+        for k, v in [
+            ("GSHEET_URL", GSHEET_URL),
+            ("CREDS_JSON", CREDS_JSON),
+        ]:
+            if not v:
+                faltan.append(k)
+        if len(GSHEET_TABS) == 0:
+            faltan.append("GSHEET_TABS o GSHEET_TAB (con 2 tabs separadas por coma)")
+
+    if INPUT_SOURCE == "DB_VIEW":
+        for k, v in [
+            ("DB_VIEW_NAME", DB_VIEW_NAME),
+            ("INPUT_DB_HOST", INPUT_DB_HOST),
+            ("INPUT_DB_DATABASE", INPUT_DB_DATABASE),
+            ("INPUT_DB_USER", INPUT_DB_USER),
+            ("INPUT_DB_PASSWORD", INPUT_DB_PASSWORD),
+        ]:
+            if not v:
+                faltan.append(k)
 
     macro_users = {
         "CENTRO": (USER_CENTRO, PASSWORD_CENTRO),
@@ -2838,6 +2963,14 @@ def load_config_from_env() -> dict:
         "DOWNLOAD_DIR_LIST": DOWNLOAD_DIR_LIST,
         "DOWNLOAD_DIR_PRIMARY": DOWNLOAD_DIR_PRIMARY,
         "DOWNLOAD_DIR_MIRRORS": DOWNLOAD_DIR_MIRRORS,
+
+        "INPUT_SOURCE": INPUT_SOURCE,
+        "DB_VIEW_NAME": DB_VIEW_NAME,
+        "INPUT_DB_HOST": INPUT_DB_HOST,
+        "INPUT_DB_PORT": int(INPUT_DB_PORT),
+        "INPUT_DB_DATABASE": INPUT_DB_DATABASE,
+        "INPUT_DB_USER": INPUT_DB_USER,
+        "INPUT_DB_PASSWORD": INPUT_DB_PASSWORD,
 
         "GSHEET_URL": GSHEET_URL,
         "CREDS_JSON": CREDS_JSON,
@@ -3130,6 +3263,8 @@ def main():
     DOWNLOAD_DIR_PRIMARY = cfg["DOWNLOAD_DIR_PRIMARY"]
     DOWNLOAD_DIR_MIRRORS = cfg["DOWNLOAD_DIR_MIRRORS"]
     FINAL_PUBLISH_DIR = cfg["FINAL_PUBLISH_DIR"]
+    INPUT_SOURCE = cfg["INPUT_SOURCE"]
+    DB_VIEW_NAME = cfg["DB_VIEW_NAME"]
     GSHEET_URL = cfg["GSHEET_URL"]
     CREDS_JSON = cfg["CREDS_JSON"]
     DOWNLOAD_TIMEOUT = cfg["DOWNLOAD_TIMEOUT"]
@@ -3202,7 +3337,11 @@ def main():
         f"special_end_offset={cfg.get('SPECIAL_END_OFFSET_DAYS', 3)}"
     )
     summary(summary_path, f"RANGE | {FE_INI} -> {FE_FIN} | TAG={TAG}")
-    summary(summary_path, f"GSHEET_TABS | {TABS}")
+    summary(summary_path, f"INPUT_SOURCE | {INPUT_SOURCE}")
+    if INPUT_SOURCE == "GSHEET":
+        summary(summary_path, f"GSHEET_TABS | {TABS}")
+    else:
+        summary(summary_path, f"DB_VIEW_NAME | {DB_VIEW_NAME}")
 
     removed_tmp_profiles = cleanup_old_chrome_profiles(CHROME_TMP_ROOT, CHROME_TMP_RETENTION_HOURS)
     summary(summary_path, f"CHROME_TMP_CLEANUP_START | removed={removed_tmp_profiles} | root={CHROME_TMP_ROOT}")
@@ -3251,36 +3390,57 @@ def main():
                 pass
             sys.exit(3)
 
-    # ===== leer checks del rango (1 o varios meses) desde tabs y merge/dedupe + macro =====
+    # ===== leer centros objetivo desde DB_VIEW o checks del rango desde tabs =====
     try:
         log_fn = lambda m: summary(summary_path, m)
 
         all_items: List[Dict[str, str]] = []
         stats_by_tab = {}
+        db_view_stats = {}
         month_headers_used = []
 
-        client = _gsheet_call_with_retry(lambda: _get_gspread_client(CREDS_JSON), log_fn=log_fn)
+        if INPUT_SOURCE == "DB_VIEW":
+            centros_meta, db_view_stats = get_centros_from_db_view(
+                host=cfg["INPUT_DB_HOST"],
+                port=cfg["INPUT_DB_PORT"],
+                database=cfg["INPUT_DB_DATABASE"],
+                user=cfg["INPUT_DB_USER"],
+                password=cfg["INPUT_DB_PASSWORD"],
+                view_name=DB_VIEW_NAME,
+            )
+            dup_global = db_view_stats.get("dup", 0)
+            macro_conflict = 0
+            month_headers_used = [f"DB_VIEW:{DB_VIEW_NAME}"]
+        else:
+            client = _gsheet_call_with_retry(lambda: _get_gspread_client(CREDS_JSON), log_fn=log_fn)
 
-        for mnum in month_nums:
-            mh = MONTHS_ES.get(mnum, f"{mnum:02d}")
-            month_headers_used.append(mh)
+            for mnum in month_nums:
+                mh = MONTHS_ES.get(mnum, f"{mnum:02d}")
+                month_headers_used.append(mh)
 
-            for t in TABS:
-                items, st, _ = read_checked_centros_with_macro_from_tab(
-                    client, GSHEET_URL, t, mnum, log_fn=log_fn
-                )
+                for t in TABS:
+                    items, st, _ = read_checked_centros_with_macro_from_tab(
+                        client, GSHEET_URL, t, mnum, log_fn=log_fn
+                    )
 
-                stats_key = f"{t}|{mh}"
-                stats_by_tab[stats_key] = st
-                all_items.extend(items)
+                    stats_key = f"{t}|{mh}"
+                    stats_by_tab[stats_key] = st
+                    all_items.extend(items)
 
-        centros_meta, dup_global, macro_conflict = merge_centros_meta_items(all_items)
+            centros_meta, dup_global, macro_conflict = merge_centros_meta_items(all_items)
 
     except Exception as e:
-        summary(summary_path, f"ERROR | GSHEET_READ | {LABEL} | {type(e).__name__}: {e}")
+        summary(summary_path, f"ERROR | INPUT_READ | source={INPUT_SOURCE} | {LABEL} | {type(e).__name__}: {e}")
         sys.exit(2)
 
     summary(summary_path, f"MONTH_CHECKS | {month_headers_used}")
+    if INPUT_SOURCE == "DB_VIEW":
+        summary(
+            summary_path,
+            f"DB_VIEW_SOURCE | view={DB_VIEW_NAME} | selected={db_view_stats.get('selected',0)} | "
+            f"dup={db_view_stats.get('dup',0)} | empty={db_view_stats.get('empty',0)} | "
+            f"invalid_macro={db_view_stats.get('invalid_macro',0)}"
+        )
     for key, st in stats_by_tab.items():
         summary(
             summary_path,
@@ -3288,15 +3448,15 @@ def main():
             f"unchecked={st.get('unchecked',0)} | empty={st.get('empty',0)} | invalid_macro={st.get('invalid_macro',0)}"
         )
 
-    summary(summary_path, f"GSHEET_MERGE | selected_total={len(centros_meta)} | dup_global={dup_global} | macro_conflict={macro_conflict}")
+    summary(summary_path, f"INPUT_MERGE | selected_total={len(centros_meta)} | dup_global={dup_global} | macro_conflict={macro_conflict}")
 
     if db and run_db_id:
         try:
            db.log_event(
                 run_db_id,
                 "INFO",
-                "GSHEET_MERGE",
-                f"selected_total={len(centros_meta)} | dup_global={dup_global} | macro_conflict={macro_conflict}"
+                "INPUT_MERGE",
+                f"source={INPUT_SOURCE} | selected_total={len(centros_meta)} | dup_global={dup_global} | macro_conflict={macro_conflict}"
            )
         except Exception as e:
             print(f"DB_LOG_WARN | {type(e).__name__}: {e}", flush=True)
@@ -3310,7 +3470,7 @@ def main():
             summary(summary_path, f"OVERRIDE_CACHE_WARN | {type(e).__name__}: {e}")
 
     if not centros_meta:
-        summary(summary_path, f"NO_WORK | No hay IPRESS marcadas para el mes {month_header}.")
+        summary(summary_path, f"NO_WORK | No hay IPRESS objetivo para {LABEL} | source={INPUT_SOURCE}.")
         end_dt = datetime.datetime.now()
         dur = (end_dt - start_dt).total_seconds()
 
@@ -3339,14 +3499,18 @@ def main():
 
     print("\n===== CONFIGURACIÓN (DIARIO) =====", flush=True)
     print(f"Rango fechas  : {LABEL}", flush=True)
-    print(f"Mes (checks)  : {month_header}", flush=True)
+    print(f"Fuente input  : {INPUT_SOURCE}", flush=True)
+    if INPUT_SOURCE == "DB_VIEW":
+        print(f"Vista DB      : {DB_VIEW_NAME}", flush=True)
+    else:
+        print(f"Mes (checks)  : {month_header}", flush=True)
     print(f"Rango         : {FE_INI} -> {FE_FIN}", flush=True)
     print(f"TAG           : {TAG}", flush=True)
     print(f"FILE_SUFFIX   : {FILE_SUFFIX}", flush=True)
     print(f"Rutas descarga: {DOWNLOAD_DIR_LIST}", flush=True)
     print(f"Ruta publish  : {FINAL_PUBLISH_DIR}", flush=True)
     print(f"MACRO_USERS   : { {k: v[0] for k, v in MACRO_USERS.items()} }", flush=True)
-    print(f"INPUT | Centros (checks merge) ({len(centros_meta)}): {centros_meta}", flush=True)
+    print(f"INPUT | Centros objetivo ({len(centros_meta)}): {centros_meta}", flush=True)
     print("==================================\n", flush=True)
 
     if not preflight_chromedriver(DOWNLOAD_DIR_PRIMARY, HEADLESS, summary_path):

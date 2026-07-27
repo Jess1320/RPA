@@ -4,6 +4,8 @@ set -Eeuo pipefail
 export TZ=America/Lima
 export HOME=/home/cenate
 export ENV_FILE="${ENV_FILE:-.env}"
+export INPUT_SOURCE=DB_VIEW
+export DB_VIEW_NAME=essi.vw_rpa_mensual_centros_objetivo_v1
 
 PROJECT_DIR="/home/cenate/rpa_cext_diario"
 PYTHON_BIN="$PROJECT_DIR/.venv/bin/python"
