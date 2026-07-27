@@ -12,7 +12,8 @@ STAGING_DOWNLOAD_DIR=tmp/downloads
 
 ## Criterios
 
-- Lee IPRESS desde `DIRECT_CENTERS`, inicialmente `739`.
+- Lee IPRESS desde `DIRECT_CENTERS=739`.
+- No usa Google Sheets ni DB para descubrir centros.
 - Usa usuarios maestros por macroregion.
 - Selecciona valores por codigo: `2`, `2`, `F41`, `A1`, `142`, `xls`.
 - Descarga primero en staging.

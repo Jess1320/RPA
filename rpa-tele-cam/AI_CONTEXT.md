@@ -19,7 +19,8 @@ Selecciones por `value`:
 
 ## Entradas
 
-- Entrada directa `DIRECT_CENTERS`, inicialmente `739`.
+- Entrada directa `DIRECT_CENTERS=739`.
+- Alcance fijo: no descubrir centros desde Google Sheets ni DB; TELECAM procesa unicamente la IPRESS `739`.
 - Credenciales maestras desde `../shared/config/.env_usuarios`.
 - Macroregion por IPRESS igual que los otros RPAs.
 

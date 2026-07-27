@@ -17,6 +17,10 @@ Descarga mensual de RPA Tele CAM desde ExplotaDatos para centros configurados di
 | Formato | `xls` |
 | Sufijo esperado | `AtenNoMedxSubAct` |
 
+## Alcance fijo
+
+TELECAM descarga unicamente la IPRESS `739`. No consulta Google Sheets ni vista DB para descubrir centros. Si en el futuro se agregan mas centros, debe modificarse explicitamente `DIRECT_CENTERS` y quedar documentado.
+
 ## Ruta
 
 - Formulario: `CtrlControl?opt=cext13`
