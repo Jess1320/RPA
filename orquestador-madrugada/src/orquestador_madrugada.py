@@ -21,6 +21,7 @@ VALID_JOB_CODES = (
     "MEDICO_NO_MEDICO",
     "TELE_PROAD",
     "TELE_PSICOPROFILAXIS",
+    "TELE_CAM",
     "TAD",
 )
 
@@ -261,6 +262,14 @@ def build_job_config(code: str) -> JobConfig:
             "command": "scripts/run_rpa_tele_psicoprofilaxis.sh",
             "logs_dir": "/home/cenate/rpa_tele_psicoprofilaxis/logs",
             "run_name": "TELE_PSICOPROFILAXIS_MADRUGADA",
+            "parser": "medico_no_medico",
+        },
+        "TELE_CAM": {
+            "name": "RPA Tele CAM",
+            "workdir": "/home/cenate/rpa_tele_cam",
+            "command": "scripts/run_rpa_tele_cam.sh",
+            "logs_dir": "/home/cenate/rpa_tele_cam/logs",
+            "run_name": "TELE_CAM_MADRUGADA",
             "parser": "medico_no_medico",
         },
         "TAD": {

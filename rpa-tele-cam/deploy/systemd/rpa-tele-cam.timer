@@ -1,0 +1,10 @@
+[Unit]
+Description=Timer RPA Tele CAM
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+Persistent=false
+Unit=rpa-tele-cam.service
+
+[Install]
+WantedBy=timers.target
