@@ -25,11 +25,11 @@ Selecciones por `value`:
 
 ## Salidas
 
-- Base: `/mnt/BD_CControl/BASE TCEX 2026/TELECAM`.
-- Subcarpeta mensual: `MM. MES`.
+- Final Windows: `\\10.0.88.100\bbdd_rpa\Bases_TELECAM_2026`.
+- Final Linux: `/mnt/BBDD_RPA/Bases_TELECAM_2026`.
 - Sufijo esperado: `AtenNoMedxSubAct`.
 
-`DOWNLOAD_DIR` debe estar vacio en produccion para no fijar un mes. La ruta final se resuelve con `DOWNLOAD_DIR_BASE` y `USE_MONTH_SUBDIR=true`; el RPA crea la subcarpeta mensual si no existe.
+`DOWNLOAD_DIR` debe estar vacio en produccion. La ruta final se resuelve con `DOWNLOAD_DIR_BASE` y `USE_MONTH_SUBDIR=false`.
 
 ## Regla de publicacion
 

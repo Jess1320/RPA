@@ -414,9 +414,9 @@ def load_config() -> dict:
     download_dir = os.getenv("DOWNLOAD_DIR", "").strip()
     download_dir_base = os.getenv(
         "DOWNLOAD_DIR_BASE",
-        "/mnt/BD_CControl/BASE TCEX 2026/TELECAM",
+        "/mnt/BBDD_RPA/Bases_TELECAM_2026",
     ).strip()
-    use_month_subdir = _env_bool("USE_MONTH_SUBDIR", "true")
+    use_month_subdir = _env_bool("USE_MONTH_SUBDIR", "false")
     staging_download_dir = os.getenv("STAGING_DOWNLOAD_DIR", "tmp/downloads").strip()
     staging_path = Path(staging_download_dir).expanduser()
     if not staging_path.is_absolute():

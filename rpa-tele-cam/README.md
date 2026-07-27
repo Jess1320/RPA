@@ -20,10 +20,10 @@ Descarga mensual de RPA Tele CAM desde ExplotaDatos para centros configurados di
 ## Ruta
 
 - Formulario: `CtrlControl?opt=cext13`
-- Carpeta base: `/mnt/BD_CControl/BASE TCEX 2026/TELECAM`
-- Carpeta mensual: `MM. MES`, por ejemplo `07. JULIO`
+- Carpeta final: `\\10.0.88.100\bbdd_rpa\Bases_TELECAM_2026`
+- Equivalente Linux: `/mnt/BBDD_RPA/Bases_TELECAM_2026`
 
-Este RPA publica en una subcarpeta distinta por mes. `DOWNLOAD_DIR` debe quedar vacio y la ruta se calcula con `DOWNLOAD_DIR_BASE` + `MM. MES`; si la carpeta mensual no existe, el RPA la crea antes de publicar.
+Este RPA publica directamente en la carpeta final. `USE_MONTH_SUBDIR=false` porque el periodo ya viene en el nombre del archivo.
 
 ## Publicacion segura
 
