@@ -509,7 +509,7 @@ class PgRPAControl:
             useranula, fecha_anula, hora_anula, orden_atencion, codmotdeser, motivo_desercion,
             codmodotorcita, modalidadotorcita, motivelimcita, numreferorigen, codconsultorio,
             desconsultorio, ultcie10aten, estado_programacion, motivo_suspension, fechreferencia,
-            usuaregistro, estadreferencia, observacion,
+            usuaregistro, estadreferencia, observacion, cita_virtual,
             extra_columns, row_hash
         )
         values %s
@@ -539,7 +539,7 @@ class PgRPAControl:
             useranula, fecha_anula, hora_anula, orden_atencion, codmotdeser, motivo_desercion,
             codmodotorcita, modalidadotorcita, motivelimcita, numreferorigen, codconsultorio,
             desconsultorio, ultcie10aten, estado_programacion, motivo_suspension, fechreferencia,
-            usuaregistro, estadreferencia, observacion,
+            usuaregistro, estadreferencia, observacion, cita_virtual,
             extra_columns,
             row_hash
         ) values %s

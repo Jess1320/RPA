@@ -271,7 +271,7 @@ STG_CEXT_COLUMNS = [
     "useranula", "fecha_anula", "hora_anula", "orden_atencion", "codmotdeser", "motivo_desercion",
     "codmodotorcita", "modalidadotorcita", "motivelimcita", "numreferorigen", "codconsultorio",
     "desconsultorio", "ultcie10aten", "estado_programacion", "motivo_suspension", "fechreferencia",
-    "usuaregistro", "estadreferencia", "observacion"
+    "usuaregistro", "estadreferencia", "observacion", "cita_virtual"
 ]
 
 
@@ -598,7 +598,7 @@ def procesar_txt_a_staging(
                 base["useranula"], base["fecha_anula"], base["hora_anula"], base["orden_atencion"], base["codmotdeser"], base["motivo_desercion"],
                 base["codmodotorcita"], base["modalidadotorcita"], base["motivelimcita"], base["numreferorigen"], base["codconsultorio"],
                 base["desconsultorio"], base["ultcie10aten"], base["estado_programacion"], base["motivo_suspension"], base["fechreferencia"],
-                base["usuaregistro"], base["estadreferencia"], base["observacion"],
+                base["usuaregistro"], base["estadreferencia"], base["observacion"], base["cita_virtual"],
                 json.dumps(extra, ensure_ascii=False),
                 row_hash
             )

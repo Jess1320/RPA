@@ -17,6 +17,8 @@ Variante separada del RPA Mensual para el flujo diurno de Cronicos.
 
 Este modulo solo descarga y publica archivos TXT. No registra staging, no refresca vistas, no sincroniza medicos y no ejecuta cierre mensual.
 
+Por compatibilidad con Consulta Externa, el parser reconoce `CITA_VIRTUAL` como `cita_virtual`. Ver [CITA_VIRTUAL - App EsSalud Digital](../docs/cita-virtual-app-essalud-digital.md).
+
 La carpeta final es la misma que usa el Mensual productivo. El reemplazo de TXT del mismo centro y periodo es esperado para el flujo de Cronicos.
 
 ## Operacion

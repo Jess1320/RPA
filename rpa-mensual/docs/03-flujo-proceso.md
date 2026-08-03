@@ -141,6 +141,8 @@ Validaciones aplicadas:
 - Hash por fila.
 - Registro de estado `LOADED_TO_STG`.
 
+La columna `CITA_VIRTUAL` se conserva como `cita_virtual` para identificar citas generadas desde la App EsSalud Digital. Ver [CITA_VIRTUAL - App EsSalud Digital](../../docs/cita-virtual-app-essalud-digital.md).
+
 ## Publicacion
 
 Cuando hay al menos un centro OK:

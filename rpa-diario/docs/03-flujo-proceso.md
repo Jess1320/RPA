@@ -50,3 +50,4 @@ systemd timer
 8. Marcar `data_ready` si aplica.
 9. Enviar notificacion.
 
+La columna `CITA_VIRTUAL` se conserva como `cita_virtual` para identificar citas generadas desde la App EsSalud Digital. Ver [CITA_VIRTUAL - App EsSalud Digital](../../docs/cita-virtual-app-essalud-digital.md).
